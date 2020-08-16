@@ -166,21 +166,6 @@ double get_grad_and_hessian(const spXd &G, const Vd &area, const Xd &uv,
   return energy;
 }
 
-double get_grad_and_hessian_reg(const spXd &G, const Vd &area, const Xd &uv,
-                            Vd &grad, spXd &hessian, double lambda)
-{
-  int f_num = area.rows();
-  Xd Ji, total_grad;
-  jacobian_from_uv(G, uv, Ji);
-  double energy;
-  energy = grad_and_hessian_from_jacobian(area, Ji, total_grad, hessian);
-
-  Vd vec_grad = vec(total_grad); //+2 * lambda * x_i
-  hessian = G.transpose() * hessian.selfadjointView<Eigen::Lower>() * G;  // +2 * lambda*Id
-  grad = vec_grad.transpose() * G;
-
-  return energy;
-}
 
 #include <igl/copyleft/cgal/orient2D.h>
 int check_flip(const Eigen::MatrixXd &uv, const Eigen::MatrixXi &Fn)

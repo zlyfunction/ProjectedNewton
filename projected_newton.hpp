@@ -66,9 +66,6 @@ Vd vec(Xd &M2);
 double get_grad_and_hessian(const spXd &G, const Vd &area, const Xd &uv,
                             Vd &grad, spXd &hessian);
 
-double get_grad_and_hessian(const spXd &G, const Vd &area, const Xd &uv,
-                            Vd &grad, spXd &hessian, double lambda);
-
 double grad_and_hessian_from_jacobian(const Vd &area, const Xd &jacobian,
                                       Xd &total_grad);
 
