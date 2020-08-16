@@ -10,11 +10,11 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 # libigl
 option(LIBIGL_USE_STATIC_LIBRARY "" OFF)
-option(LIBIGL_WITH_OPENGL            "Use OpenGL"         OFF)
-option(LIBIGL_WITH_OPENGL_GLFW       "Use GLFW"           OFF)
-option(LIBIGL_WITH_TRIANGLE            "Use OpenGL"         OFF)
-option(LIBIGL_WITH_CGAL              "Use CGAL"           OFF)
-option(LIBIGL_WITH_OPENGL_GLFW_IMGUI "Use ImGui"          OFF)
+option(LIBIGL_WITH_OPENGL            "Use OpenGL"         ON)
+option(LIBIGL_WITH_OPENGL_GLFW       "Use GLFW"           ON)
+option(LIBIGL_WITH_TRIANGLE            "Use Triangle"       OFF)
+option(LIBIGL_WITH_CGAL              "Use CGAL"           ON)
+option(LIBIGL_WITH_OPENGL_GLFW_IMGUI "Use ImGui"          ON)
 
 find_package(LIBIGL QUIET)
 
@@ -27,17 +27,20 @@ if(UNIX)
 endif()
 
 add_executable(projnewton_bin main.cpp projected_newton.cpp)
-target_link_libraries(projnewton_bin igl::core)
+target_link_libraries(projnewton_bin igl::core igl::cgal igl::opengl_glfw igl::opengl_glfw_imgui)
+target_compile_definitions(projnewton_bin PUBLIC AD_ENGINE=jakob)
 
-add_executable(jakob_bin main.cpp projected_newton.cpp)
-target_link_libraries(jakob_bin igl::core)
-target_compile_definitions(jakob_bin PUBLIC AD_ENGINE=jakob)
+add_executable(view_mesh_bin view_mesh.cpp)
+target_link_libraries(view_mesh_bin igl::core igl::opengl_glfw igl::opengl_glfw_imgui)
+# add_executable(jakob_bin main.cpp projected_newton.cpp)
+# target_link_libraries(jakob_bin igl::core igl::opengl_glfw igl::opengl_glfw_imgui)
+# target_compile_definitions(jakob_bin PUBLIC AD_ENGINE=jakob)
 
-add_executable(desai_bin main.cpp projected_newton.cpp)
-target_link_libraries(desai_bin igl::core)
-target_compile_definitions(desai_bin PUBLIC AD_ENGINE=desai)
+# add_executable(desai_bin main.cpp projected_newton.cpp)
+# target_link_libraries(desai_bin igl::core igl::opengl_glfw igl::opengl_glfw_imgui)
+# target_compile_definitions(desai_bin PUBLIC AD_ENGINE=desai)
 
 
-add_executable(test_bin profile.cpp)
-target_link_libraries(test_bin igl::core)
-target_compile_features(test_bin PUBLIC cxx_std_17)
+# add_executable(test_bin profile.cpp)
+# target_link_libraries(test_bin igl::core)
+# target_compile_features(test_bin PUBLIC cxx_std_17)

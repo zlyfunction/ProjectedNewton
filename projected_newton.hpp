@@ -66,8 +66,13 @@ Vd vec(Xd &M2);
 double get_grad_and_hessian(const spXd &G, const Vd &area, const Xd &uv,
                             Vd &grad, spXd &hessian);
 
+double get_grad_and_hessian(const spXd &G, const Vd &area, const Xd &uv,
+                            Vd &grad, spXd &hessian, double lambda);
+
 double grad_and_hessian_from_jacobian(const Vd &area, const Xd &jacobian,
                                       Xd &total_grad);
+
+int check_flip(const Eigen::MatrixXd &uv, const Eigen::MatrixXi &Fn);
 
 double wolfe_linesearch(
     const Eigen::MatrixXi F,
@@ -75,5 +80,13 @@ double wolfe_linesearch(
     Eigen::MatrixXd &dst_v,
     std::function<double(Eigen::MatrixXd &)> energy,
     Eigen::VectorXd &grad0,
-    double energy0);
+    double energy0, bool use_gd);
+
+double bi_linesearch(
+    const Eigen::MatrixXi F,
+    Eigen::MatrixXd &cur_v,
+    Eigen::MatrixXd &dst_v,
+    std::function<double(Eigen::MatrixXd &)> energy,
+    Eigen::VectorXd &grad0,
+    double energy0, bool use_gd);
 #endif

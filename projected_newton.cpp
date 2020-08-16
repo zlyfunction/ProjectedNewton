@@ -85,30 +85,30 @@ double grad_and_hessian_from_jacobian(const Vd &area, const Xd &jacobian,
   std::vector<Eigen::Matrix4d> all_hessian(f_num);
   igl::Timer timer;
   timer.start();
-// #ifndef AD_ENGINE
-//   Eigen::Matrix<double, -1, -1, Eigen::RowMajor> half_hessian(f_num, 16);
-//   Eigen::Matrix<double, -1, -1, Eigen::RowMajor> local_grad(f_num, 4);
-//   Vd energy_vec = desai::gradient_and_hessian_from_J_vec(jacobian, local_grad, half_hessian);
-// #ifndef NOHESSIAN
-//   energy = energy_vec.dot(area) / total_area;
-//   total_grad = area.asDiagonal() * local_grad / total_area;
-//   half_hessian = area.asDiagonal() * half_hessian / total_area;
-//   for (int i = 0; i < f_num; i++)
-//   {
-//     auto hessian = half_hessian.row(i);
-//     all_hessian[i] << hessian[0], hessian[1], hessian[2], hessian[3],
-//         hessian[1], hessian[4], hessian[5], hessian[6],
-//         hessian[2], hessian[5], hessian[7], hessian[8],
-//         hessian[3], hessian[6], hessian[8], hessian[9];
-//   }
-// #endif
-// #else
+  // #ifndef AD_ENGINE
+  //   Eigen::Matrix<double, -1, -1, Eigen::RowMajor> half_hessian(f_num, 16);
+  //   Eigen::Matrix<double, -1, -1, Eigen::RowMajor> local_grad(f_num, 4);
+  //   Vd energy_vec = desai::gradient_and_hessian_from_J_vec(jacobian, local_grad, half_hessian);
+  // #ifndef NOHESSIAN
+  //   energy = energy_vec.dot(area) / total_area;
+  //   total_grad = area.asDiagonal() * local_grad / total_area;
+  //   half_hessian = area.asDiagonal() * half_hessian / total_area;
+  //   for (int i = 0; i < f_num; i++)
+  //   {
+  //     auto hessian = half_hessian.row(i);
+  //     all_hessian[i] << hessian[0], hessian[1], hessian[2], hessian[3],
+  //         hessian[1], hessian[4], hessian[5], hessian[6],
+  //         hessian[2], hessian[5], hessian[7], hessian[8],
+  //         hessian[3], hessian[6], hessian[8], hessian[9];
+  //   }
+  // #endif
+  // #else
   for (int i = 0; i < f_num; i++)
   {
     Eigen::RowVector4d J = jacobian.row(i);
     Eigen::Matrix4d local_hessian;
     Eigen::RowVector4d local_grad;
-    energy += AD_ENGINE::gradient_and_hessian_from_J(J, local_grad, local_hessian)*area(i)/total_area;
+    energy += AD_ENGINE::gradient_and_hessian_from_J(J, local_grad, local_hessian) * area(i) / total_area;
 #ifndef NOHESSIAN
     local_grad *= area(i) / total_area;
     local_hessian *= area(i) / total_area;
@@ -116,7 +116,7 @@ double grad_and_hessian_from_jacobian(const Vd &area, const Xd &jacobian,
     total_grad.row(i) = local_grad;
 #endif
   }
-// #endif
+  // #endif
   global_autodiff_time += timer.getElapsedTimeInMicroSec();
 
 #ifndef NOHESSIAN
@@ -137,8 +137,6 @@ double grad_and_hessian_from_jacobian(const Vd &area, const Xd &jacobian,
 #endif
   return energy;
 }
-
-
 
 void jacobian_from_uv(const spXd &G, const Xd &uv, Xd &Ji)
 {
@@ -161,42 +159,123 @@ double get_grad_and_hessian(const spXd &G, const Vd &area, const Xd &uv,
   double energy;
   energy = grad_and_hessian_from_jacobian(area, Ji, total_grad, hessian);
 
-  Vd vec_grad = vec(total_grad);
-  hessian = G.transpose() * hessian.selfadjointView<Eigen::Lower>() * G;
+  Vd vec_grad = vec(total_grad); //+2 * lambda * x_i
+  hessian = G.transpose() * hessian.selfadjointView<Eigen::Lower>() * G;  // +2 * lambda*Id
   grad = vec_grad.transpose() * G;
 
   return energy;
 }
 
+double get_grad_and_hessian_reg(const spXd &G, const Vd &area, const Xd &uv,
+                            Vd &grad, spXd &hessian, double lambda)
+{
+  int f_num = area.rows();
+  Xd Ji, total_grad;
+  jacobian_from_uv(G, uv, Ji);
+  double energy;
+  energy = grad_and_hessian_from_jacobian(area, Ji, total_grad, hessian);
+
+  Vd vec_grad = vec(total_grad); //+2 * lambda * x_i
+  hessian = G.transpose() * hessian.selfadjointView<Eigen::Lower>() * G;  // +2 * lambda*Id
+  grad = vec_grad.transpose() * G;
+
+  return energy;
+}
+
+#include <igl/copyleft/cgal/orient2D.h>
+int check_flip(const Eigen::MatrixXd &uv, const Eigen::MatrixXi &Fn)
+{
+  int fl = 0;
+  for (int i = 0; i < Fn.rows(); i++)
+  {
+    double a[2] = {uv(Fn(i, 0), 0), uv(Fn(i, 0), 1)};
+    double b[2] = {uv(Fn(i, 1), 0), uv(Fn(i, 1), 1)};
+    double c[2] = {uv(Fn(i, 2), 0), uv(Fn(i, 2), 1)};
+    if (igl::copyleft::cgal::orient2D(a, b, c) <= 0)
+    {
+      fl++;
+    }
+  }
+  return fl;
+  // std::cout << "flipped # " << fl << std::endl;
+}
 #include <igl/flip_avoiding_line_search.h>
 #include <iostream>
+double bi_linesearch(
+    const Eigen::MatrixXi F,
+    Eigen::MatrixXd &cur_v,
+    Eigen::MatrixXd &d,
+    std::function<double(Eigen::MatrixXd &)> energy,
+    Eigen::VectorXd &grad0,
+    double energy0, bool use_gd)
+{
+  double step_size = 2.0;
+  double new_energy = 0;
+  Eigen::MatrixXd newx;
+  Vd flat_d = Eigen::Map<const Vd>(d.data(), d.size());
+  double slope = flat_d.dot(grad0);
+  double c1 = 1e-4;
+  while (true)
+  {
+    step_size /= 2;
+    newx = cur_v + step_size * d;
+    if (check_flip(newx, F) > 0)
+    {
+      continue;
+    }
+    new_energy = energy(newx);
+    if (new_energy <= energy0 + c1 * step_size * slope) // armijo
+    {
+      break;
+    }
+    if ((new_energy < energy0))
+    {
+      break;
+    }
+    if (step_size == 0)
+    {
+      break;
+    }
+  }
+  std::cout << "step size: " << step_size << std::endl;
+  cur_v = newx;
+  return new_energy;
+}
+
 double wolfe_linesearch(
     const Eigen::MatrixXi F,
     Eigen::MatrixXd &cur_v,
     Eigen::MatrixXd &d,
     std::function<double(Eigen::MatrixXd &)> energy,
     Eigen::VectorXd &grad0,
-    double energy0)
+    double energy0, bool use_gd)
 {
   using namespace std;
 
-  double min_step_to_singularity = igl::flip_avoiding::compute_max_step_from_singularities(cur_v,F,d);
-  double step_size = std::min(1., min_step_to_singularity*0.8);
-
+  double min_step_to_singularity = igl::flip_avoiding::compute_max_step_from_singularities(cur_v, F, d);
+  double step_size = std::min(1., min_step_to_singularity * 0.8);
+  // std::cout << "min_step_to_singularity:" << min << std::endl;
   double new_energy = 0;
   Eigen::MatrixXd newx;
   Vd flat_d = Eigen::Map<const Vd>(d.data(), d.size());
   double slope = flat_d.dot(grad0);
-    auto c1 = 1e-4;
-  for (int i=0; i<200; i++){
-    newx = cur_v + step_size*d;
+  auto c1 = 1e-4;
+  for (int i = 0; i < 200; i++)
+  {
+    newx = cur_v + step_size * d;
     new_energy = energy(newx);
-    if (new_energy <= energy0 + c1*step_size*slope // armijo
+    if (new_energy <= energy0 + c1 * step_size * slope // armijo
     )
       break;
+    if ((use_gd) && (new_energy < energy0))
+    {
+      break;
+    }
 
-    step_size = 0.8*step_size;
+    step_size = 0.8 * step_size;
   }
+  std::cout << "step size: " << step_size << std::endl;
+  // check stepsize
   cur_v = newx;
   return new_energy;
 }
