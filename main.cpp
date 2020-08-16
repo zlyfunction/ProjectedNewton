@@ -107,8 +107,6 @@ int main(int argc, char *argv[])
     spXd Dx, Dy, G;
     prepare(V, F, Dx, Dy);
     G = combine_Dx_Dy(Dx, Dy);
-
-    double lambda = 0.0;
     
     int start_iter = 0;
     Xd cur_uv;
@@ -155,7 +153,8 @@ int main(int argc, char *argv[])
     std::cout << "Start Energy" << energy << std::endl;
     double old_energy = energy;
 
-    bool use_gd = true;
+    bool use_gd = false;
+    double lambda = 100;
     Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     for (int ii = start_iter + 1; ii < 100000; ii++)
     {
@@ -163,6 +162,9 @@ int main(int argc, char *argv[])
         Vd grad;
         std::cout << "\nIt" << ii << std::endl;
         double e1 = get_grad_and_hessian(G, dblarea, cur_uv, grad, hessian);
+        spXd Id(hessian.rows(), hessian.cols());
+        Id.setIdentity();
+        hessian = hessian + lambda * Id;
         // hessian.setIdentity();
         if (ii == start_iter + 1)
             solver.analyzePattern(hessian);
@@ -212,7 +214,7 @@ int main(int argc, char *argv[])
             }
             new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton
             // auto grad_dir = -Eigen::Map<Xd>(grad.data(), V.rows(), 2);
-            std::cout << acos(newton.dot(grad)/newton.norm()/grad.norm()) << "\n";
+            std::cout << "<grad, newton> = "<<acos(newton.dot(grad)/newton.norm()/grad.norm()) << "\n";
         }
 
         
