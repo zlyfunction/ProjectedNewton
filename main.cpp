@@ -10,6 +10,7 @@
 #include <igl/read_triangle_mesh.h>
 #include <igl/serialize.h>
 #include <igl/writeDMAT.h>
+#include <igl/readOBJ.h>
 #include <igl/writeOBJ.h>
 #include <igl/writeOFF.h>
 #include <igl/write_triangle_mesh.h>
@@ -88,13 +89,32 @@ int main(int argc, char *argv[])
     Xd bnd_uv;
     double mesh_area;
     Xd CN;
-    Xi FN;
+    Xi FN, FTC;
 
     std::string model = argv[1];
     igl::deserialize(F, "F", model);
     igl::deserialize(uv_init, "uv", model);
     igl::deserialize(V, "V", model);
+    Vd dblarea_uv;
+    igl::doublearea(uv_init, F, dblarea_uv);
+    // for (int i = 0; i < F.rows(); i++)
+    // {
+    //     double max_e = (uv_init(F(i,0), 0) - uv_init(F(i, 1), 0)) * (uv_init(F(i,0), 0) - uv_init(F(i, 1), 0)) + (uv_init(F(i,0), 1) - uv_init(F(i, 1), 1)) * (uv_init(F(i,0), 1) - uv_init(F(i, 1), 1));
+    //     for (int j = 1; j < 3; j++)
+    //     {
+    //         double tmp = (uv_init(F(i,j), 0) - uv_init(F(i, (j+1)%3), 0)) * (uv_init(F(i,j), 0) - uv_init(F(i, (j+1)%3), 0)) + (uv_init(F(i,j), 1) - uv_init(F(i, (j+1)%3), 1)) * (uv_init(F(i,j), 1) - uv_init(F(i, (j+1)%3), 1));
+    //         if (tmp > max_e)
+    //         {
+    //             max_e = tmp;
+    //         }
+    //     }
+    //     std::cout << std::setprecision(17) << max_e / dblarea_uv(i) << std::endl;
+    // }
+    // return 0;
+    
     // igl::read_triangle_mesh(argv[1], V, F);
+    // igl::readOBJ(model, V, uv_init, CN, F, FTC, FN);
+
     // igl::boundary_loop(F, bnd);
     // igl::map_vertices_to_circle(V, bnd, bnd_uv);
     // igl::harmonic(V, F, bnd, bnd_uv, 1, uv_init);
@@ -154,7 +174,8 @@ int main(int argc, char *argv[])
     double old_energy = energy;
 
     bool use_gd = false;
-    double lambda = 100;
+    double lambda = 1;
+
     Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     for (int ii = start_iter + 1; ii < 100000; ii++)
     {
@@ -162,13 +183,28 @@ int main(int argc, char *argv[])
         Vd grad;
         std::cout << "\nIt" << ii << std::endl;
         double e1 = get_grad_and_hessian(G, dblarea, cur_uv, grad, hessian);
-        spXd Id(hessian.rows(), hessian.cols());
-        Id.setIdentity();
-        hessian = hessian + lambda * Id;
-        // hessian.setIdentity();
+        
+        // spXd Id(hessian.rows(), hessian.cols());
+        // Id.setIdentity();
+        // hessian = hessian + lambda * Id;
+        
         if (ii == start_iter + 1)
+        {
             solver.analyzePattern(hessian);
-
+            std::cout << std::setprecision(17);
+            std::cout << "Hessian at beginning: " << std::endl;
+            std::cout << "Row\tCol\tVal" << std::endl;
+                for (int k = 0; k < hessian.outerSize(); ++k)
+                {
+                    for (Eigen::SparseMatrix<double>::InnerIterator it(hessian, k); it; ++it)
+                    {
+                        std::cout << 1 + it.row() << "\t"; // row index
+                        std::cout << 1 + it.col() << "\t"; // col index (here it is equal to k)
+                        std::cout << it.value() << std::endl;
+                    }
+                }
+                std::cout << grad << std::endl;
+        }
         // if (ii > 1000)
         // {
         //   use_gd = true;
@@ -179,7 +215,6 @@ int main(int argc, char *argv[])
         if (use_gd)
         {
             new_dir = -Eigen::Map<Xd>(grad.data(), V.rows(), 2); // gradient descent
-            // std::cout << new_dir.size() << std::endl;
         }
         else
         {
@@ -189,31 +224,11 @@ int main(int argc, char *argv[])
             if (solver.info() != Eigen::Success)
             {
                 std::cout << "solver.info() = " << solver.info() << std::endl;
-                // std::cout << "hessian = \n";
-                // std::cout << "Row\tCol\tVal" << std::endl;
-                // for (int k = 0; k < hessian.outerSize(); ++k)
-                // {
-                //     for (Eigen::SparseMatrix<double>::InnerIterator it(hessian, k); it; ++it)
-                //     {
-                //         std::cout << 1 + it.row() << "\t"; // row index
-                //         std::cout << 1 + it.col() << "\t"; // col index (here it is equal to k)
-                //         std::cout << it.value() << std::endl;
-                //     }
-                // }
-                // Eigen::SparseMatrix<double> Id(hessian.rows(), hessian.cols());
-                // Id.setIdentity();
-                // double alpha = 1e-10;
-                // auto new_hessian = hessian + alpha * Id;
-                // solver.analyzePattern(new_hessian);
-                // solver.factorize(new_hessian);
-                // newton = solver.solve(grad);
-                // std::cout << "solver.info() = " << solver.info() << std::endl;
                 std::cout << "start using gd\n";
-                use_gd = true;
+                // use_gd = true;
                 // exit(1);
             }
             new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton
-            // auto grad_dir = -Eigen::Map<Xd>(grad.data(), V.rows(), 2);
             std::cout << "<grad, newton> = "<<acos(newton.dot(grad)/newton.norm()/grad.norm()) << "\n";
         }
 
