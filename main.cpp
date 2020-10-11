@@ -72,7 +72,8 @@ void prepare(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, spXd &Dx,
     Eigen::MatrixXd F1, F2, F3;
     igl::local_basis(V, F, F1, F2, F3);
     Eigen::SparseMatrix<double> G;
-    igl::grad(V, F, G, true); // use uniform mesh instead of V
+    igl::grad(V,F,G);
+    // igl::grad(V, F, G, true); // use uniform mesh instead of V
     auto face_proj = [](Eigen::MatrixXd &F) {
         std::vector<Eigen::Triplet<double>> IJV;
         int f_num = F.rows();
@@ -446,6 +447,12 @@ int main(int argc, char *argv[])
             lambda = lambda * 0.8;
             std::cout << "lambda ->" << lambda << std::endl;
         }
+        else
+        {
+            lambda = lambda / 0.8 > 0.99? 0.99:lambda/0.8;
+            std::cout << "lambda ->" << lambda << std::endl;
+        }
+        
         old_energy = energy;
 
         // save the cur_uv
