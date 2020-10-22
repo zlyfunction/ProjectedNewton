@@ -171,11 +171,17 @@ double get_grad_and_hessian(const spXd &G, const Vd &area, const Xd &uv,
 int check_flip(const Eigen::MatrixXd &uv, const Eigen::MatrixXi &Fn)
 {
   int fl = 0;
+  // std::cout << "uv" << uv.rows() << std::endl;
+  // std::cout << uv << std::endl;
   for (int i = 0; i < Fn.rows(); i++)
   {
+    // std::cout << "Fn.row(i) = "<< Fn.row(i) << std::endl;
     double a[2] = {uv(Fn(i, 0), 0), uv(Fn(i, 0), 1)};
     double b[2] = {uv(Fn(i, 1), 0), uv(Fn(i, 1), 1)};
     double c[2] = {uv(Fn(i, 2), 0), uv(Fn(i, 2), 1)};
+    // std::cout << a[0] << " " << a[1] << std::endl;
+    // std::cout << b[0] << " " << b[1] << std::endl;
+    // std::cout << c[0] << " " << c[1] << std::endl;
     if (igl::copyleft::cgal::orient2D(a, b, c) <= 0)
     {
       fl++;
@@ -192,9 +198,9 @@ double bi_linesearch(
     Eigen::MatrixXd &d,
     std::function<double(Eigen::MatrixXd &)> energy,
     Eigen::VectorXd &grad0,
-    double energy0, bool use_gd)
+    double energy0, double &step_size)
 {
-  double step_size = 2.0;
+  step_size = 2.0;
   double new_energy = 0;
   Eigen::MatrixXd newx;
   Vd flat_d = Eigen::Map<const Vd>(d.data(), d.size());
@@ -209,10 +215,10 @@ double bi_linesearch(
       continue;
     }
     new_energy = energy(newx);
-    if (new_energy <= energy0 + c1 * step_size * slope) // armijo
-    {
-      break;
-    }
+    // if (new_energy <= energy0 + c1 * step_size * slope) // armijo
+    // {
+    //   break;
+    // }
     if ((new_energy < energy0))
     {
       break;

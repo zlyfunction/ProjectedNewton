@@ -25,6 +25,8 @@
 #include <unordered_set>
 
 #include "projected_newton.hpp"
+
+#include <fstream>
 void construct_Fn(Eigen::MatrixXi &Fn, const Eigen::MatrixXi &F_copy, const std::vector<Eigen::Vector3i> &new_face_list, const std::vector<int> &delete_faces)
 {
 
@@ -72,8 +74,8 @@ void prepare(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, spXd &Dx,
     Eigen::MatrixXd F1, F2, F3;
     igl::local_basis(V, F, F1, F2, F3);
     Eigen::SparseMatrix<double> G;
-    igl::grad(V,F,G);
-    // igl::grad(V, F, G, true); // use uniform mesh instead of V
+    // igl::grad(V, F, G);
+    igl::grad(V, F, G, true); // use uniform mesh instead of V
     auto face_proj = [](Eigen::MatrixXd &F) {
         std::vector<Eigen::Triplet<double>> IJV;
         int f_num = F.rows();
@@ -125,6 +127,7 @@ void buildAeq(
     const Eigen::MatrixXd &uv,
     Eigen::SparseMatrix<double> &Aeq)
 {
+    std::cout << "build constraint matrix\n";
     Eigen::VectorXd tail;
     int N = uv.rows();
     int c = 0;
@@ -218,17 +221,15 @@ void buildkkt(spXd &hessian, spXd &Aeq, spXd &AeqT, spXd &kkt)
         if (c < hessian.cols())
         {
             for (Eigen::SparseMatrix<double>::InnerIterator ithessian(hessian, c); ithessian; ++ithessian)
-            kkt.insertBack(ithessian.row(), c) = ithessian.value();
+                kkt.insertBack(ithessian.row(), c) = ithessian.value();
             for (Eigen::SparseMatrix<double>::InnerIterator itAeq(Aeq, c); itAeq; ++itAeq)
-            kkt.insertBack(itAeq.row() + hessian.rows(), c) = itAeq.value();
+                kkt.insertBack(itAeq.row() + hessian.rows(), c) = itAeq.value();
         }
         else
         {
             for (Eigen::SparseMatrix<double>::InnerIterator itAeqT(AeqT, c - hessian.cols()); itAeqT; ++itAeqT)
-            kkt.insertBack(itAeqT.row(), c) = itAeqT.value();
+                kkt.insertBack(itAeqT.row(), c) = itAeqT.value();
         }
-        
-        
     }
     kkt.finalize();
 }
@@ -253,14 +254,14 @@ int main(int argc, char *argv[])
 
     // deserialize cut
     igl::deserialize(cut, "cut", model);
+    std::cout << F.rows() << " " << uv_init.rows() << " " << V.rows() << " " << cut.rows() << std::endl;
     spXd Aeq;
     buildAeq(cut, uv_init, Aeq);
     spXd AeqT = Aeq.transpose();
     Vd dblarea_uv;
     igl::doublearea(uv_init, F, dblarea_uv);
     igl::writeOBJ("input_init.obj", V, F, CN, FN, uv_init, F);
-    // std::cout << "#fl: " << check_flip(uv_init, F) << std::endl;
-    // return 0;
+
     for (int i = 0; i < F.rows(); i++)
     {
         double max_e = (uv_init(F(i, 0), 0) - uv_init(F(i, 1), 0)) * (uv_init(F(i, 0), 0) - uv_init(F(i, 1), 0)) + (uv_init(F(i, 0), 1) - uv_init(F(i, 1), 1)) * (uv_init(F(i, 0), 1) - uv_init(F(i, 1), 1));
@@ -354,9 +355,12 @@ int main(int argc, char *argv[])
     std::cout << "Start Energy" << energy << std::endl;
     double old_energy = energy;
 
-    bool use_gd = false;
+    // bool use_gd = false;
     double lambda = 0.999;
 
+    std::ofstream writecsv;
+    writecsv.open("log.csv");
+    writecsv << "step,E_avg,E_max,step_size,<dir，grad>,|dir|,|grad|,lambda,#flip" << std::endl;
     // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
     for (int ii = start_iter + 1; ii < 100000; ii++)
@@ -372,72 +376,56 @@ int main(int argc, char *argv[])
         spXd kkt(hessian.rows() + Aeq.rows(), hessian.cols() + Aeq.rows());
         buildkkt(hessian, Aeq, AeqT, kkt);
 
-        // spXd kkt = hessian;
-        // kkt.conservativeResize(hessian.rows() + Aeq.cols(), hessian.rows() + Aeq.rows());
-        // kkt.block(0, hessian.cols() + 1, AeqT.rows(), AeqT.cols()) = AeqT;
-        // kkt.block(hessian.rows() + 1, 0, Aeq.rows(), Aeq.cols()) = Aeq;
         if (ii == start_iter + 1)
         {
             // solver.analyzePattern(hessian);
             solver.analyzePattern(kkt);
-            // std::cout << std::setprecision(17);
-            // std::cout << "Hessian at beginning: " << std::endl;
-            // std::cout << "Row\tCol\tVal" << std::endl;
-            //     for (int k = 0; k < hessian.outerSize(); ++k)
-            //     {
-            //         for (Eigen::SparseMatrix<double>::InnerIterator it(hessian, k); it; ++it)
-            //         {
-            //             std::cout << 1 + it.row() << "\t"; // row index
-            //             std::cout << 1 + it.col() << "\t"; // col index (here it is equal to k)
-            //             std::cout << it.value() << std::endl;
-            //         }
-            //     }
-            //     std::cout << grad << std::endl;
         }
-        // if (ii > 1000)
-        // {
-        //   use_gd = true;
-        //   std::cout << "change to gd\n";
-        // }
 
         Xd new_dir;
-        if (use_gd)
+        
+        // solver.factorize(hessian);
+        // Vd newton = solver.solve(grad);
+        grad.conservativeResize(kkt.cols());
+        for (int i = hessian.cols(); i < kkt.cols(); i++)
         {
-            new_dir = -Eigen::Map<Xd>(grad.data(), V.rows(), 2); // gradient descent
+            grad(i) = 0;
         }
-        else
+        solver.factorize(kkt);
+        Vd newton = solver.solve(grad);
+        // std::cout << "solver.info() = " << solver.info() << std::endl;
+        // std::cout << "newton before resize:" << newton.rows() << std::endl << newton << std::endl;
+        // std::cout << "grad before resize:" << grad.rows() << std::endl << grad << std::endl;
+
+        newton.conservativeResize(hessian.cols());
+        grad.conservativeResize(hessian.cols());
+
+        // std::cout << "grad:" << grad.rows() << std::endl << grad << std::endl;
+        // std::cout << "newton: " << newton.rows() << std::endl << newton << std::endl;
+        if (solver.info() != Eigen::Success)
         {
-            // solver.factorize(hessian);
-            // Vd newton = solver.solve(grad);
-            grad.conservativeResize(kkt.cols());
-            for (int i = hessian.cols() + 1; i < kkt.cols(); i++)
-            {
-                grad(i) = 0;
-            }
-            solver.factorize(kkt);
-            Vd newton = solver.solve(grad);
-            newton.conservativeResize(hessian.cols());
-            grad.conservativeResize(hessian.cols());
-            
-            if (solver.info() != Eigen::Success)
-            {
-                std::cout << "solver.info() = " << solver.info() << std::endl;
-                std::cout << "start using gd\n";
-                // use_gd = true;
-                // exit(1);
-            }
-            new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton
-            std::cout << "<grad, newton> = " << acos(newton.dot(grad) / newton.norm() / grad.norm()) << "\n";
+            std::cout << "solver.info() = " << solver.info() << std::endl;
+            std::cout << "start using gd\n";
+            // use_gd = true;
+            // exit(1);
         }
+        new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton
+        std::cout << "<grad, newton> = " << acos(newton.dot(grad) / newton.norm() / grad.norm()) << "\n";
 
         // energy = wolfe_linesearch(F, cur_uv, new_dir, compute_energy, grad, energy, use_gd);
-        energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, grad, energy, use_gd);
+        double step_size;
+        energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, grad, energy, step_size);
 
+        double E_avg = compute_energy(cur_uv), E_max = compute_energy_max(cur_uv);
+        int n_flip = check_flip(cur_uv, F);
         std::cout << std::setprecision(20)
-                  << "E=" << compute_energy(cur_uv) << "\t\tE_max=" << compute_energy_max(cur_uv)
+                  << "E=" << E_avg << "\t\tE_max=" << E_max
                   << "\n |new_dir|=" << new_dir.norm() << "\t|grad|=" << grad.norm() << std::endl;
-        std::cout << "#fl = " << check_flip(cur_uv, F) << std::endl;
+        std::cout << "#fl = " << n_flip << std::endl;
         std::cout << "lambda = " << lambda << std::endl;
+
+        writecsv << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << "," << acos(newton.dot(grad) / newton.norm() / grad.norm()) 
+                << "," << new_dir.norm() << "," << grad.norm() << "," << lambda << "," << n_flip << std::endl;
         if (std::abs(energy - 4) < 1e-10)
             // norm of the grad
             // if (std::abs(energy - old_energy) < 1e-9)
@@ -449,10 +437,10 @@ int main(int argc, char *argv[])
         }
         else
         {
-            lambda = lambda / 0.8 > 0.99? 0.99:lambda/0.8;
+            lambda = lambda / 0.8 > 0.99 ? 0.99 : lambda / 0.8;
             std::cout << "lambda ->" << lambda << std::endl;
         }
-        
+
         old_energy = energy;
 
         // save the cur_uv

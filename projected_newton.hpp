@@ -85,5 +85,5 @@ double bi_linesearch(
     Eigen::MatrixXd &dst_v,
     std::function<double(Eigen::MatrixXd &)> energy,
     Eigen::VectorXd &grad0,
-    double energy0, bool use_gd);
+    double energy0, double &step_size);
 #endif
