@@ -119,6 +119,16 @@ void build_for_vis(const Eigen::MatrixXi &cut, std::vector<std::vector<std::pair
     }
     all_pairs[3] = edges;
     all_colors[3] = colors;
+    
+    Eigen::MatrixXd color_table(8, 3);
+    color_table << 25,25,112, 
+                    0,100,0, 
+                    255,69,0,
+                    255,215,0,
+                    34,139,34,
+                    255,182,193,
+                    30,144,255,
+                    178,48,96;
 
     edges.clear();
     for (int i = 0; i < cut.rows(); i++)
@@ -133,9 +143,10 @@ void build_for_vis(const Eigen::MatrixXi &cut, std::vector<std::vector<std::pair
         }
     }
     colors.resize(edges.size(), 3);
-    for (int i = 0; i < colors.rows(); i++)
+    for (int i = 0; i < colors.rows()/2; i++)
     {
-        colors.row(i) = Eigen::RowVector3d(1, 0, 1);
+        colors.row(2*i) = color_table.row(i%8) / 255.0;
+        colors.row(2*i+1) = color_table.row(i%8)/ 255.0;
     }
     all_pairs[4] = edges;
     all_colors[4] = colors;
@@ -228,7 +239,7 @@ int main(int argc, char *argv[])
                 // std::cout << all_pairs[0].size() << std::endl;
                 plot_edges(viewer, cur_uv, F, all_colors[i], all_pairs[i]);
             }
-            plot_singularity(viewer, cur_uv, F, S, 0.5);
+            plot_singularity(viewer, cur_uv, F, S, 0.2);
             viewer.core().align_camera_center(cur_uv, F);
         }
         else if (key == '1')
@@ -252,7 +263,7 @@ int main(int argc, char *argv[])
 
                 plot_edges(viewer, cur_uv, F, all_colors[i], all_pairs[i]);
             }
-            plot_singularity(viewer, cur_uv, F, S, 0.5);
+            plot_singularity(viewer, cur_uv, F, S, 0.2);
             viewer.core().align_camera_center(cur_uv, F);
         }
         viewer.data().compute_normals();
