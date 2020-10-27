@@ -7,7 +7,6 @@
 #include <igl/colormap.h>
 #include "plot.h"
 
-
 // this functio is only for knot1 model
 void build_for_vis(const Eigen::MatrixXi &cut, std::vector<std::vector<std::pair<int, int>>> &all_pairs, std::vector<Eigen::MatrixXd> &all_colors)
 {
@@ -152,8 +151,13 @@ int main(int argc, char *argv[])
 
     // for visualization
     Eigen::MatrixXi cut;
+    Eigen::VectorXd S;
     igl::deserialize(cut, "cut", "/Users/leyi/re1/seamless_signature/build/padding/knot1_forslim_serialized", true);
-    std::cout << "cut" << cut.rows() << std::endl;
+    igl::deserialize(S, "S", "/Users/leyi/re1/seamless_signature/build/padding/knot1_forslim_serialized", true);
+
+    // std::cout << "cut" << cut.rows() << std::endl;
+    std::cout << "S " << S.rows() << std::endl;
+    std::cout << "V " << V.rows() << std::endl;
     // check_flip(uv, F);
     Eigen::VectorXd Energy(F.rows());
     Eigen::MatrixXd color(F.rows(), 3);
@@ -220,11 +224,11 @@ int main(int argc, char *argv[])
             viewer.data().set_mesh(cur_uv, F);
             for (int i = 0; i < all_pairs.size(); i++)
             {
-                std::cout << i << std::endl;
-                std::cout << all_pairs[0].size() << std::endl;
+                // std::cout << i << std::endl;
+                // std::cout << all_pairs[0].size() << std::endl;
                 plot_edges(viewer, cur_uv, F, all_colors[i], all_pairs[i]);
             }
-
+            plot_singularity(viewer, cur_uv, F, S, 0.5);
             viewer.core().align_camera_center(cur_uv, F);
         }
         else if (key == '1')
@@ -245,10 +249,10 @@ int main(int argc, char *argv[])
             viewer.data().set_mesh(cur_uv, F);
             for (int i = 0; i < all_pairs.size(); i++)
             {
-                
+
                 plot_edges(viewer, cur_uv, F, all_colors[i], all_pairs[i]);
             }
-
+            plot_singularity(viewer, cur_uv, F, S, 0.5);
             viewer.core().align_camera_center(cur_uv, F);
         }
         viewer.data().compute_normals();
