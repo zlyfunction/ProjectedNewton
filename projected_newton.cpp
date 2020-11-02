@@ -65,7 +65,8 @@ namespace desai
 
 double compute_energy_from_jacobian(const Xd &J, const Vd &area)
 {
-  return symmetric_dirichlet_energy(J.col(0), J.col(1), J.col(2), J.col(3)).dot(area) / area.sum();
+  // return symmetric_dirichlet_energy(J.col(0), J.col(1), J.col(2), J.col(3)).dot(area) / area.sum();
+  return symmetric_dirichlet_energy(J.col(0), J.col(1), J.col(2), J.col(3)).dot(Eigen::VectorXd::Ones(area.rows())) / area.rows(); // uniform
 }
 
 extern long global_autodiff_time;

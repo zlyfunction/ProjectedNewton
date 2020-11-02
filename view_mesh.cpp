@@ -241,12 +241,17 @@ int main(int argc, char *argv[])
             }
             plot_singularity(viewer, cur_uv, F, S, 0.2);
             viewer.core().align_camera_center(cur_uv, F);
+            viewer.selected_data_index = 0;
         }
         else if (key == '1')
         {
-            // viewer.data().clear();
-            viewer.data().set_mesh(V, F);
-            viewer.core().align_camera_center(V, F);
+            viewer.data_list.resize(1);
+            viewer.selected_data_index = 0;
+            viewer.data().clear();
+            // viewer.data().set_mesh(V, F);
+            viewer.data().set_mesh(V, F.row(63));
+            // viewer.core().align_camera_center(V, F);
+            viewer.core().align_camera_center(V, F.row(63));
         }
         else if (key == ' ')
         {
