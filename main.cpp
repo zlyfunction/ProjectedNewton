@@ -265,6 +265,7 @@ int main(int argc, char *argv[])
     
     Vd dblarea;
     igl::doublearea(V, F, dblarea);
+    dblarea.setConstant(sqrt(3) / 4);
     dblarea *= 0.5;
     mesh_area = dblarea.sum();
     
@@ -320,6 +321,14 @@ int main(int argc, char *argv[])
         return compute_energy_from_jacobian(Ji, dblarea);
     };
 
+    auto compute_grad = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa)
+    {
+        spXd hessian;
+        Vd gradE;
+        get_grad_and_hessian(G, dblarea, aaa, gradE, hessian);
+        return gradE;
+    };
+
     auto compute_energy_max = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa) {
         Xd Ji;
         jacobian_from_uv(G, aaa, Ji);
@@ -352,15 +361,15 @@ int main(int argc, char *argv[])
 
     std::ofstream writecsv;
     writecsv.open("log.csv");
-    writecsv << "step,E_avg,E_max,step_size,|dir|,|grad|,newton_dec^2,lambda,#flip" << std::endl;
+    writecsv << "step,E_avg,E_max,step_size,|dir|,|gradL|,newton_dec^2,lambda,#flip" << std::endl;
     // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
     for (int ii = start_iter + 1; ii < 100000; ii++)
     {
         spXd hessian;
-        Vd grad;
+        Vd gradE;
         std::cout << "\nIt" << ii << std::endl;
-        double e1 = get_grad_and_hessian(G, dblarea, cur_uv, grad, hessian);
+        double e1 = get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
         // std::cout << cur_uv.rows() << " " << hessian.rows() << std::endl;
         spXd Id(hessian.rows(), hessian.cols());
         Id.setIdentity();
@@ -374,29 +383,18 @@ int main(int argc, char *argv[])
             solver.analyzePattern(kkt);
         }
 
-        Xd new_dir;
-
-        // solver.factorize(hessian);
-        // Vd newton = solver.solve(grad);
-        grad.conservativeResize(kkt.cols());
+        gradE.conservativeResize(kkt.cols());
         for (int i = hessian.cols(); i < kkt.cols(); i++)
         {
-            grad(i) = 0;
+            gradE(i) = 0;
         }
         solver.factorize(kkt);
-        Vd newton = solver.solve(grad);
-        // std::cout << "solver.info() = " << solver.info() << std::endl;
-        // std::cout << "newton before resize:" << newton.rows() << std::endl << newton << std::endl;
-        // std::cout << "grad before resize:" << grad.rows() << std::endl << grad << std::endl;
-        Vd w = newton.tail(newton.rows() - hessian.cols());
-        w = AeqT * w;
-        // std::cout << w.rows() << " " << hessian.cols() << std::endl;
+        Vd newton = solver.solve(gradE);
+        
+        Vd w =  -newton.tail(newton.rows() - hessian.cols());
         newton.conservativeResize(hessian.cols());
-        grad.conservativeResize(hessian.cols());
-        // std::cout << w.rows() << " " << grad.rows() << std::endl;
-        // grad = grad - w;
-        // std::cout << "grad:" << grad.rows() << std::endl << grad << std::endl;
-        // std::cout << "newton: " << newton.rows() << std::endl << newton << std::endl;
+        gradE.conservativeResize(hessian.cols());
+        
         if (solver.info() != Eigen::Success)
         {
             std::cout << "solver.info() = " << solver.info() << std::endl;
@@ -404,27 +402,28 @@ int main(int argc, char *argv[])
             // use_gd = true;
             // exit(1);
         }
-        new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton
-        std::cout << "<grad, newton> = " << acos(newton.dot(grad) / newton.norm() / grad.norm()) << "\n";
+        Xd new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton
+        std::cout << "-gradE.dot(Dx) = " << newton.dot(gradE) << "\n";
         double newton_dec2 = newton.dot(hessian*newton);
-        // energy = wolfe_linesearch(F, cur_uv, new_dir, compute_energy, grad, energy, use_gd);
+        // energy = wolfe_linesearch(F, cur_uv, new_dir, compute_energy, gradE, energy, use_gd);
         double step_size;
-        energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, grad, energy, step_size);
-        get_grad_and_hessian(G, dblarea, cur_uv, grad, hessian);
-        grad = grad - w;
+        energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, compute_grad, gradE, energy, step_size);
+        get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
+        Vd gradL = gradE + AeqT * w;
+        
         double E_avg = compute_energy(cur_uv), E_max = compute_energy_max(cur_uv);
         int n_flip = check_flip(cur_uv, F);
         std::cout << std::setprecision(20)
                   << "E=" << E_avg << "\t\tE_max=" << E_max
-                  << "\n |new_dir|=" << new_dir.norm() << "\t|grad|=" << grad.norm() << std::endl;
+                  << "\n |new_dir|=" << new_dir.norm() << "\t|gradL|=" << gradL.norm() << std::endl;
         std::cout << "neton_dec^2 = " << newton_dec2 << std::endl;
         std::cout << "#fl = " << n_flip << std::endl;
         std::cout << "lambda = " << lambda << std::endl;
 
-        writecsv << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << "," << newton_dec2
-                 << "," << new_dir.norm() << "," << grad.norm() << "," << lambda << "," << n_flip << std::endl;
+        writecsv << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << 
+                  "," << new_dir.norm() << "," << gradL.norm()  << "," << newton_dec2<< "," << lambda << "," << n_flip << std::endl;
         if (std::abs(energy - 4) < 1e-10)
-            // norm of the grad
+            // norm of the gradE
             // if (std::abs(energy - old_energy) < 1e-9)
             break;
         if (fabs(old_energy - energy) < 1e-16)
@@ -438,6 +437,11 @@ int main(int argc, char *argv[])
             std::cout << "lambda ->" << lambda << std::endl;
         }
 
+        if (lambda < 1e-12)
+        {
+            std::cout << "lambda < 1e-12, break\n";
+            break;
+        }
         old_energy = energy;
 
         // save the cur_uv
@@ -445,7 +449,7 @@ int main(int argc, char *argv[])
         igl::serialize(cur_uv, "cur_uv", outfilename, true);
     }
 
-    std::cout << "write mesh\n";
-    igl::writeOBJ("out.obj", V, F, CN, FN, cur_uv, F);
+    // std::cout << "write mesh\n";
+    // igl::writeOBJ("out.obj", V, F, CN, FN, cur_uv, F);
     // std::cout << compute_energy_all(cur_uv) << std::endl;
 }

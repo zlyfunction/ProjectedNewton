@@ -110,6 +110,8 @@ double grad_and_hessian_from_jacobian(const Vd &area, const Xd &jacobian,
     Eigen::Matrix4d local_hessian;
     Eigen::RowVector4d local_grad;
     energy += AD_ENGINE::gradient_and_hessian_from_J(J, local_grad, local_hessian) * area(i) / total_area;
+    // energy += AD_ENGINE::gradient_and_hessian_from_J(J, local_grad, local_hessian) / f_num;
+
 #ifndef NOHESSIAN
     local_grad *= area(i) / total_area;
     local_hessian *= area(i) / total_area;
@@ -198,10 +200,12 @@ double bi_linesearch(
     Eigen::MatrixXd &cur_v,
     Eigen::MatrixXd &d,
     std::function<double(Eigen::MatrixXd &)> energy,
+    std::function<Eigen::VectorXd(Eigen::MatrixXd &)> get_grad,
     Eigen::VectorXd &grad0,
     double energy0, double &step_size)
 {
   step_size = 2.0;
+  // step_size = 1.01;
   double new_energy = 0;
   Eigen::MatrixXd newx;
   Vd flat_d = Eigen::Map<const Vd>(d.data(), d.size());
@@ -210,12 +214,23 @@ double bi_linesearch(
   while (true)
   {
     step_size /= 2;
+    // step_size -= 0.01;
     newx = cur_v + step_size * d;
     if (check_flip(newx, F) > 0)
     {
+      std::cout << "cause flip, step_size/=2\n";
       continue;
     }
     new_energy = energy(newx);
+
+    // test line search
+    // std::cout << "step_size = " << step_size << "\t";
+    // std::cout << "new_energy = " << new_energy << "\t";
+    // Eigen::VectorXd new_gradE = get_grad(newx);
+    // std::cout << "grad.dot(d) = " << new_gradE.dot(flat_d) << "\t";
+    // Xd newx_shift = newx + 1e-6 * d;
+    // std::cout << "de/ds = " << (energy(newx_shift) - new_energy) / 1e-6 << std::endl;
+
     // if (new_energy <= energy0 + c1 * step_size * slope) // armijo
     // {
     //   break;
@@ -228,6 +243,7 @@ double bi_linesearch(
     {
       break;
     }
+    // std::cout << "energy did not decrease, step_size/=2\n";
   }
   std::cout << "step size: " << step_size << std::endl;
   cur_v = newx;
