@@ -63,25 +63,6 @@ spXd combine_Dx_Dy(const spXd &Dx, const spXd &Dy)
     return igl::cat(1, igl::cat(2, hstack, empty), igl::cat(2, empty, hstack));
 }
 
-// #include <igl/slim.h>
-// Xd timing_slim(const Xd &V, const Xi &F, const Xd &uv)
-// {
-//     igl::SLIMData data;
-//     Eigen::VectorXi b;
-//     Xd bc;
-//     igl::Timer timer;
-//     timer.start();
-//     igl::slim_precompute(V, F, uv, data,
-//                          igl::MappingEnergyType::SYMMETRIC_DIRICHLET, b, bc, 0.);
-//     for (int i = 0; i < 100; i++)
-//     {
-//         igl::slim_solve(data, 1);
-//         std::cout << "SLIM e=" << data.energy
-//                   << "\tTimer:" << timer.getElapsedTime() << std::endl;
-//     }
-//     return data.V_o;
-// }
-
 void buildAeq(
     const Eigen::MatrixXi &cut,
     const Eigen::MatrixXd &uv,
@@ -242,54 +223,22 @@ int main(int argc, char *argv[])
     Xi FN, FTC;
     Xi cut;
 
-    std::string model = argv[1];
-    igl::deserialize(F, "F", model);
-    igl::deserialize(uv_init, "uv", model);
-    igl::deserialize(V, "V", model);
+    F.resize(1,3);
+    F << 0, 1, 2;
+    uv_init.resize(3, 2);
+    // uv_init << 0.0, 0.0, 1.0, 0.0, 0.5, sqrt(3) / 2.0;
+    uv_init << 0.0, 0.0, 1.0, 0.0, 0.0, 1.0;
 
-    // deserialize cut
-    igl::deserialize(cut, "cut", model);
-    std::cout << F.rows() << " " << uv_init.rows() << " " << V.rows() << " " << cut.rows() << std::endl;
-    spXd Aeq;
-    buildAeq(cut, uv_init, F, Aeq);
-    spXd AeqT = Aeq.transpose();
+    V.resize(3, 3);
+    V << 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, sqrt(3) / 2.0, 0.0;
+
     Vd dblarea_uv;
     igl::doublearea(uv_init, F, dblarea_uv);
     igl::writeOBJ("input_init.obj", V, F, CN, FN, uv_init, F);
 
     Vd dblarea;
     igl::doublearea(V, F, dblarea);
-    dblarea.setConstant(sqrt(3) / 4);
-    dblarea *= 0.5;
-    mesh_area = dblarea.sum();
-
-    for (int i = 0; i < F.rows(); i++)
-    {
-        double max_e = (uv_init(F(i, 0), 0) - uv_init(F(i, 1), 0)) * (uv_init(F(i, 0), 0) - uv_init(F(i, 1), 0)) + (uv_init(F(i, 0), 1) - uv_init(F(i, 1), 1)) * (uv_init(F(i, 0), 1) - uv_init(F(i, 1), 1));
-        for (int j = 1; j < 3; j++)
-        {
-            double tmp = (uv_init(F(i, j), 0) - uv_init(F(i, (j + 1) % 3), 0)) * (uv_init(F(i, j), 0) - uv_init(F(i, (j + 1) % 3), 0)) + (uv_init(F(i, j), 1) - uv_init(F(i, (j + 1) % 3), 1)) * (uv_init(F(i, j), 1) - uv_init(F(i, (j + 1) % 3), 1));
-            if (tmp > max_e)
-            {
-                max_e = tmp;
-            }
-        }
-        std::cout << i << ": " << std::setprecision(17) << max_e / dblarea_uv(i) << std::endl;
-    }
-
-    // check 63
-    // std::cout << "check triangle #63\n";
-    // for (int i = 0; i < 3; i++)
-    // {
-    //     std::cout << (V.row(F(63, i)) - V.row(F(63, (i+1)%3))).norm() << " ";
-    // }
-    // std::cout << "\tarea" << dblarea(63) << std::endl;
-    // for (int i = 0; i < 3; i++)
-    // {
-    //     std::cout << (uv_init.row(F(63, i)) - uv_init.row(F(63, (i+1)%3))).norm() << " ";
-    // }
-    // std::cout << "\tarea" << dblarea_uv(63) << std::endl;
-
+    dblarea /= 2;
     spXd Dx, Dy, G;
     prepare(V, F, Dx, Dy);
     G = combine_Dx_Dy(Dx, Dy);
@@ -353,8 +302,8 @@ int main(int argc, char *argv[])
     std::ofstream writecsv;
     writecsv.open("log.csv");
     writecsv << "step,E_avg,E_max,step_size,|dir|,|gradL|,newton_dec^2,lambda,#flip" << std::endl;
-    // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
-    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
+    // Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
     for (int ii = start_iter + 1; ii < 275; ii++)
     {
         spXd hessian;
@@ -368,51 +317,23 @@ int main(int argc, char *argv[])
         std::ofstream write_grad;
         write_grad.open(grad_filename);
         write_grad << std::setprecision(20) << gradE;
-        
-
-        // do complete newton
-        // spXd Id(hessian.rows(), hessian.cols());
-        // Id.setIdentity();
-        // hessian = lambda * hessian + (1 - lambda) * Id;
-
-        spXd kkt(hessian.rows() + Aeq.rows(), hessian.cols() + Aeq.rows());
-        buildkkt(hessian, Aeq, AeqT, kkt);
-        hessian_filename = "hessian/kkt_" + std::to_string(ii) + ".txt";
-        write_hessian_to_file(kkt, hessian_filename);
 
         if (ii == start_iter + 1)
         {
             // solver.analyzePattern(hessian);
-            solver.analyzePattern(kkt);
+            solver.analyzePattern(hessian);
         }
 
-        gradE.conservativeResize(kkt.cols());
-        for (int i = hessian.cols(); i < kkt.cols(); i++)
-        {
-            gradE(i) = 0;
-        }
-        solver.factorize(kkt);
+        solver.factorize(hessian);
         Vd newton = solver.solve(gradE);
 
-        Vd w = -newton.tail(newton.rows() - hessian.cols());
-        newton.conservativeResize(hessian.cols());
-        gradE.conservativeResize(hessian.cols());
-
-        if (solver.info() != Eigen::Success)
-        {
-            std::cout << "solver.info() = " << solver.info() << std::endl;
-            std::cout << "start using gd\n";
-            // use_gd = true;
-            // exit(1);
-        }
         Xd new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton
         std::cout << "-gradE.dot(Dx) = " << newton.dot(gradE) << "\n";
         double newton_dec2 = newton.dot(hessian * newton);
         // energy = wolfe_linesearch(F, cur_uv, new_dir, compute_energy, gradE, energy, use_gd);
         double step_size;
         energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, compute_grad, gradE, energy, step_size);
-        get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
-        Vd gradL = gradE + AeqT * w;
+        Vd gradL = gradE;
 
         double E_avg = compute_energy(cur_uv), E_max = compute_energy_max(cur_uv);
         int n_flip = check_flip(cur_uv, F);
@@ -428,30 +349,11 @@ int main(int argc, char *argv[])
             // norm of the gradE
             // if (std::abs(energy - old_energy) < 1e-9)
             break;
-        // if (fabs(old_energy - energy) < 1e-16)
-        // {
-        //     lambda = lambda * 0.8;
-        //     std::cout << "lambda ->" << lambda << std::endl;
-        // }
-        // else
-        // {
-        //     lambda = lambda / 0.8 > 0.99 ? 0.99 : lambda / 0.8;
-        //     std::cout << "lambda ->" << lambda << std::endl;
-        // }
 
-        // if (lambda < 1e-12)
-        // {
-        //     std::cout << "lambda < 1e-12, break\n";
-        //     break;
-        // }
         old_energy = energy;
 
         // save the cur_uv
         std::string outfilename = "./serialized/cur_uv_step" + std::to_string(ii);
         igl::serialize(cur_uv, "cur_uv", outfilename, true);
     }
-
-    // std::cout << "write mesh\n";
-    // igl::writeOBJ("out.obj", V, F, CN, FN, cur_uv, F);
-    // std::cout << compute_energy_all(cur_uv) << std::endl;
 }

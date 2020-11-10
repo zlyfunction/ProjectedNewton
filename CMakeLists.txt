@@ -30,6 +30,10 @@ add_executable(projnewton_bin main.cpp projected_newton.cpp)
 target_link_libraries(projnewton_bin igl::core igl::cgal igl::opengl_glfw igl::opengl_glfw_imgui)
 target_compile_definitions(projnewton_bin PUBLIC AD_ENGINE=jakob)
 
+add_executable(test_bin test.cpp projected_newton.cpp)
+target_link_libraries(test_bin igl::core igl::cgal igl::opengl_glfw igl::opengl_glfw_imgui)
+target_compile_definitions(test_bin PUBLIC AD_ENGINE=jakob)
+
 add_executable(view_mesh_bin view_mesh.cpp plot.cpp)
 target_link_libraries(view_mesh_bin igl::core igl::opengl_glfw igl::opengl_glfw_imgui)
 # add_executable(jakob_bin main.cpp projected_newton.cpp)
