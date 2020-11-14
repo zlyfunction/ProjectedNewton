@@ -119,16 +119,16 @@ void build_for_vis(const Eigen::MatrixXi &cut, std::vector<std::vector<std::pair
     }
     all_pairs[3] = edges;
     all_colors[3] = colors;
-    
+
     Eigen::MatrixXd color_table(8, 3);
-    color_table << 25,25,112, 
-                    0,100,0, 
-                    255,69,0,
-                    255,215,0,
-                    34,139,34,
-                    255,182,193,
-                    30,144,255,
-                    178,48,96;
+    color_table << 25, 25, 112,
+        0, 100, 0,
+        255, 69, 0,
+        255, 215, 0,
+        34, 139, 34,
+        255, 182, 193,
+        30, 144, 255,
+        178, 48, 96;
 
     edges.clear();
     for (int i = 0; i < cut.rows(); i++)
@@ -143,10 +143,10 @@ void build_for_vis(const Eigen::MatrixXi &cut, std::vector<std::vector<std::pair
         }
     }
     colors.resize(edges.size(), 3);
-    for (int i = 0; i < colors.rows()/2; i++)
+    for (int i = 0; i < colors.rows() / 2; i++)
     {
-        colors.row(2*i) = color_table.row(i%8) / 255.0;
-        colors.row(2*i+1) = color_table.row(i%8)/ 255.0;
+        colors.row(2 * i) = color_table.row(i % 8) / 255.0;
+        colors.row(2 * i + 1) = color_table.row(i % 8) / 255.0;
     }
     all_pairs[4] = edges;
     all_colors[4] = colors;
@@ -219,7 +219,14 @@ int main(int argc, char *argv[])
     std::vector<std::vector<std::pair<int, int>>> all_pairs(5);
     std::vector<Eigen::MatrixXd> all_colors(5);
     // test visualization
-    build_for_vis(cut, all_pairs, all_colors);
+    if (argc > 2)
+    {
+        build_for_vis(cut, all_pairs, all_colors);
+    }
+    else
+    {
+        all_pairs.clear();
+    }
 
     igl::opengl::glfw::Viewer viewer;
     viewer.data().set_mesh(V, F);
@@ -233,13 +240,17 @@ int main(int argc, char *argv[])
             viewer.data().clear();
 
             viewer.data().set_mesh(cur_uv, F);
-            for (int i = 0; i < all_pairs.size(); i++)
+            if (argc > 2)
             {
-                // std::cout << i << std::endl;
-                // std::cout << all_pairs[0].size() << std::endl;
-                plot_edges(viewer, cur_uv, F, all_colors[i], all_pairs[i]);
+                for (int i = 0; i < all_pairs.size(); i++)
+                {
+                    // std::cout << i << std::endl;
+                    // std::cout << all_pairs[0].size() << std::endl;
+                    plot_edges(viewer, cur_uv, F, all_colors[i], all_pairs[i]);
+                }
+                plot_singularity(viewer, cur_uv, F, S, 0.2);
             }
-            plot_singularity(viewer, cur_uv, F, S, 0.2);
+
             viewer.core().align_camera_center(cur_uv, F);
             viewer.selected_data_index = 0;
         }
@@ -249,9 +260,9 @@ int main(int argc, char *argv[])
             viewer.selected_data_index = 0;
             viewer.data().clear();
             // viewer.data().set_mesh(V, F);
-            viewer.data().set_mesh(V, F.row(63));
+            // viewer.data().set_mesh(V, F.row(63));
             // viewer.core().align_camera_center(V, F);
-            viewer.core().align_camera_center(V, F.row(63));
+            // viewer.core().align_camera_center(V, F.row(63));
         }
         else if (key == ' ')
         {
@@ -263,13 +274,18 @@ int main(int argc, char *argv[])
             std::string infilename = "./serialized/cur_uv_step" + std::to_string(start_iter);
             igl::deserialize(cur_uv, "cur_uv", infilename);
             viewer.data().set_mesh(cur_uv, F);
-            for (int i = 0; i < all_pairs.size(); i++)
+            if (argc > 2)
             {
+                for (int i = 0; i < all_pairs.size(); i++)
+                {
 
-                plot_edges(viewer, cur_uv, F, all_colors[i], all_pairs[i]);
+                    plot_edges(viewer, cur_uv, F, all_colors[i], all_pairs[i]);
+                }
+                plot_singularity(viewer, cur_uv, F, S, 0.2);
             }
-            plot_singularity(viewer, cur_uv, F, S, 0.2);
-            viewer.core().align_camera_center(cur_uv, F);
+
+            viewer.selected_data_index = 0;
+            // viewer.core().align_camera_center(cur_uv, F);
         }
         viewer.data().compute_normals();
         return false;

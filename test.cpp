@@ -28,6 +28,48 @@
 
 #include <fstream>
 
+void construct_Fn(Eigen::MatrixXi &Fn, const Eigen::MatrixXi &F_copy, const std::vector<Eigen::Vector3i> &new_face_list, const std::vector<int> &delete_faces)
+{
+
+    Fn.resize(F_copy.rows() - delete_faces.size() + new_face_list.size(), F_copy.cols());
+    int tmp = -1;
+    if (delete_faces.size() >= 1)
+    {
+        for (int j = 0; j < delete_faces[0]; j++)
+        {
+            tmp++;
+            Fn.row(tmp) = F_copy.row(j);
+        }
+        for (int i = 0; i < delete_faces.size() - 1; i++)
+        {
+            for (int j = delete_faces[i] + 1; j < delete_faces[i + 1]; j++)
+            {
+                tmp++;
+                Fn.row(tmp) = F_copy.row(j);
+            }
+        }
+        for (int j = delete_faces.back() + 1; j < F_copy.rows(); j++)
+        {
+            tmp++;
+            Fn.row(tmp) = F_copy.row(j);
+        }
+    }
+    else
+    {
+        for (int j = 0; j < F_copy.rows(); j++)
+        {
+            tmp++;
+            Fn.row(tmp) = F_copy.row(j);
+        }
+    }
+
+    for (int i = 0; i < new_face_list.size(); i++)
+    {
+        tmp++;
+        Fn.row(tmp) = new_face_list[i];
+    }
+}
+
 void prepare(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, spXd &Dx,
              spXd &Dy)
 {
@@ -223,22 +265,44 @@ int main(int argc, char *argv[])
     Xi FN, FTC;
     Xi cut;
 
-    F.resize(1,3);
-    F << 0, 1, 2;
-    uv_init.resize(3, 2);
-    // uv_init << 0.0, 0.0, 1.0, 0.0, 0.5, sqrt(3) / 2.0;
-    uv_init << 0.0, 0.0, 1.0, 0.0, 0.0, 1.0;
+    if (argc > 1)
+    {
+        std::cout << "read model\n";
+        std::string model = argv[1];
+        igl::readOBJ(model, V, uv_init, CN, F, FN, FN);
+        std::cout << V << std::endl;
+        std::cout << uv_init << std::endl;
+        std::cout << F << std::endl;
+        // igl::deserialize(F, "F", model);
+        // igl::deserialize(uv_init, "uv", model);
+        // igl::deserialize(V, "V", model);
 
-    V.resize(3, 3);
-    V << 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, sqrt(3) / 2.0, 0.0;
+    }
+    else
+    {
+        std::cout << "test single triangle\n";
+        F.resize(1,3);
+        F << 0, 1, 2;
+        uv_init.resize(3, 2);
+        uv_init << 0.0, 0.0, 1.0, 0.0, 0.0, 1.0;
+        // uv_init << 0.0, 0.0, 1.0, 0.0, 0.5, sqrt(3) / 2.0;
+
+        V.resize(3, 3);
+        V << 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, sqrt(3) / 2.0, 0.0;
+    }
+    
+    igl::writeOBJ("input_init.obj", V, F, CN, FN, uv_init, F);
+    
+    
 
     Vd dblarea_uv;
     igl::doublearea(uv_init, F, dblarea_uv);
-    igl::writeOBJ("input_init.obj", V, F, CN, FN, uv_init, F);
 
     Vd dblarea;
     igl::doublearea(V, F, dblarea);
-    dblarea /= 2;
+    dblarea.setConstant(1); // set area to be a constant
+    mesh_area = dblarea.sum();
+    
     spXd Dx, Dy, G;
     prepare(V, F, Dx, Dy);
     G = combine_Dx_Dy(Dx, Dy);
@@ -273,6 +337,7 @@ int main(int argc, char *argv[])
     auto compute_energy_max = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa) {
         Xd Ji;
         jacobian_from_uv(G, aaa, Ji);
+        // std::cout << "Jacobian:\n" << Ji << std::endl;
         auto E = symmetric_dirichlet_energy(Ji.col(0), Ji.col(1), Ji.col(2), Ji.col(3));
         double max_e = E(0);
         for (int i = 0; i < E.size(); i++)
@@ -304,12 +369,114 @@ int main(int argc, char *argv[])
     writecsv << "step,E_avg,E_max,step_size,|dir|,|gradL|,newton_dec^2,lambda,#flip" << std::endl;
     Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     // Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
-    for (int ii = start_iter + 1; ii < 275; ii++)
+    for (int ii = start_iter + 1; ii < 100000; ii++)
     {
         spXd hessian;
         Vd gradE;
         std::cout << "\nIt" << ii << std::endl;
         get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
+
+        /////////////////////////
+        // check the hessian with fd
+        /////////////////////////
+        Xd hessian_fd(cur_uv.size(), cur_uv.size());
+        spXd tmp;
+        for (int i = 0; i < cur_uv.size(); i++)
+        {
+            // std::cout << "hello";
+            Vd newgrad;
+            Xd newx = cur_uv;
+            newx(i % 3, i / 3) += 1e-8;
+            get_grad_and_hessian(G, dblarea, newx, newgrad, tmp);
+            hessian_fd.col(i) = (newgrad - gradE) / 1e-8; 
+        }
+        hessian_fd.col(0).setConstant(0);
+        hessian_fd.row(0).setConstant(0);
+        hessian_fd.col(V.rows()).setConstant(0);
+        hessian_fd.row(V.rows()).setConstant(0);
+        hessian_fd(0,0) = 1;
+        hessian_fd(V.rows(), V.rows()) = 1;
+        std::string fd_filename = "hessian/fd_" + std::to_string(ii) + ".txt";
+        std::ofstream write_fd;
+        write_fd.open(fd_filename);
+        write_fd << std::setprecision(20);
+        for (int i = 0; i < hessian_fd.rows(); i++)
+        {
+            for (int j = 0; j < hessian_fd.cols(); j++)
+            {
+                if (hessian_fd(i, j) != 0)
+                {
+                    write_fd << i+1 << "\t" << j+1 << "\t" << hessian_fd(i, j) << std::endl;
+                }
+            }
+        }    
+
+
+
+        // fix two dofs
+        for (int k = 0; k < hessian.outerSize(); k++)
+        {
+            for (Eigen::SparseMatrix<double>::InnerIterator it(hessian, k); it; ++it)
+            {
+                if (it.row() == 0 || it.col()  == 0)
+                {
+                    if (it.col() == it.row())
+                    {
+                        it.valueRef() = 1.0;
+                    }
+                    else
+                    {
+                        it.valueRef() = 0;
+                    }
+                }
+                if (it.row() == V.rows() || it.col() == V.rows())
+                {
+                    if (it.col() == it.row())
+                    {
+                        it.valueRef() = 1.0;
+                    }   
+                    else
+                    {
+                        it.valueRef() = 0;
+                    }
+                }
+                // if (it.row() == 1 || it.col()  == 1)
+                // {
+                //     if (it.col() == it.row())
+                //     {
+                //         it.valueRef() = 1.0;
+                //     }
+                //     else
+                //     {
+                //         it.valueRef() = 0;
+                //     }
+                // }
+                
+                // if (it.row() == V.rows() + 1 || it.col() == V.rows() + 1)
+                // {
+                //     if (it.col() == it.row())
+                //     {
+                //         it.valueRef() = 1.0;
+                //     }   
+                //     else
+                //     {
+                //         it.valueRef() = 0;
+                //     }
+                // }
+            
+            }
+        }
+        
+        gradE(0) = 0;
+        gradE(V.rows()) = 0; 
+        // gradE(1) = 0; 
+        // gradE(V.rows() + 1) = 0;
+
+        // add disturb to avoid singular
+        // spXd Id(hessian.rows(), hessian.cols());
+        // Id.setIdentity();
+        // hessian = hessian + 1e-10 * Id;
+
         std::string hessian_filename = "hessian/hessian_" + std::to_string(ii) + ".txt";
         write_hessian_to_file(hessian, hessian_filename);
         
@@ -318,6 +485,11 @@ int main(int argc, char *argv[])
         write_grad.open(grad_filename);
         write_grad << std::setprecision(20) << gradE;
 
+        std::string uv_filename = "hessian/uv_" + std::to_string(ii) + ".txt";
+        std::ofstream write_uv;
+        write_uv.open(uv_filename);
+        write_uv << std::setprecision(20) << Eigen::Map<Vd>(cur_uv.data(), cur_uv.size());
+        
         if (ii == start_iter + 1)
         {
             // solver.analyzePattern(hessian);
@@ -333,8 +505,9 @@ int main(int argc, char *argv[])
         // energy = wolfe_linesearch(F, cur_uv, new_dir, compute_energy, gradE, energy, use_gd);
         double step_size;
         energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, compute_grad, gradE, energy, step_size);
+        
+        get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
         Vd gradL = gradE;
-
         double E_avg = compute_energy(cur_uv), E_max = compute_energy_max(cur_uv);
         int n_flip = check_flip(cur_uv, F);
         std::cout << std::setprecision(20)
@@ -343,11 +516,17 @@ int main(int argc, char *argv[])
         std::cout << "neton_dec^2 = " << newton_dec2 << std::endl;
         std::cout << "#fl = " << n_flip << std::endl;
         std::cout << "lambda = " << lambda << std::endl;
+        std::cout << "uv = \n";
+        for (int kk = 0; kk < cur_uv.rows(); kk++)
+        {
+            std::cout << cur_uv.row(kk) << std::endl;
+        }
 
         writecsv << std::setprecision(20) << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << "," << new_dir.norm() << "," << gradL.norm() << "," << newton_dec2 << "," << lambda << "," << n_flip << std::endl;
-        if (std::abs(energy - 4) < 1e-10)
-            // norm of the gradE
-            // if (std::abs(energy - old_energy) < 1e-9)
+        // if (std::abs(energy - 4) < 1e-10)
+        //     // norm of the gradE
+        // if (std::abs(energy - old_energy) < 1e-9)
+        if (step_size == 0)
             break;
 
         old_energy = energy;

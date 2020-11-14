@@ -128,7 +128,7 @@ double grad_and_hessian_from_jacobian(const Vd &area, const Xd &jacobian,
   {
     Eigen::Matrix4d &local_hessian = all_hessian[i];
 
-    project_hessian(local_hessian);
+    // project_hessian(local_hessian);
     for (int v1 = 0; v1 < 4; v1++)
       for (int v2 = 0; v2 < v1 + 1; v2++)
         hessian.insert(v1 * f_num + i, v2 * f_num + i) = local_hessian(v1, v2);
@@ -228,6 +228,7 @@ double bi_linesearch(
     // std::cout << "new_energy = " << new_energy << "\t";
     // Eigen::VectorXd new_gradE = get_grad(newx);
     // std::cout << "grad.dot(d) = " << new_gradE.dot(flat_d) << "\t";
+    // std::cout << "grad:\n" << new_gradE << std::endl;
     // Xd newx_shift = newx + 1e-6 * d;
     // std::cout << "de/ds = " << (energy(newx_shift) - new_energy) / 1e-6 << std::endl;
 
