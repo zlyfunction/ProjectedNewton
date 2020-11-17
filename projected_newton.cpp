@@ -127,8 +127,7 @@ double grad_and_hessian_from_jacobian(const Vd &area, const Xd &jacobian,
   for (int i = 0; i < f_num; i++)
   {
     Eigen::Matrix4d &local_hessian = all_hessian[i];
-
-    // project_hessian(local_hessian);
+    if (fabs(total_grad(i)) > 1e-3) project_hessian(local_hessian);
     for (int v1 = 0; v1 < 4; v1++)
       for (int v2 = 0; v2 < v1 + 1; v2++)
         hessian.insert(v1 * f_num + i, v2 * f_num + i) = local_hessian(v1, v2);

@@ -379,37 +379,38 @@ int main(int argc, char *argv[])
         /////////////////////////
         // check the hessian with fd
         /////////////////////////
-        Xd hessian_fd(cur_uv.size(), cur_uv.size());
-        spXd tmp;
-        for (int i = 0; i < cur_uv.size(); i++)
-        {
-            // std::cout << "hello";
-            Vd newgrad;
-            Xd newx = cur_uv;
-            newx(i % 3, i / 3) += 1e-8;
-            get_grad_and_hessian(G, dblarea, newx, newgrad, tmp);
-            hessian_fd.col(i) = (newgrad - gradE) / 1e-8; 
-        }
-        hessian_fd.col(0).setConstant(0);
-        hessian_fd.row(0).setConstant(0);
-        hessian_fd.col(V.rows()).setConstant(0);
-        hessian_fd.row(V.rows()).setConstant(0);
-        hessian_fd(0,0) = 1;
-        hessian_fd(V.rows(), V.rows()) = 1;
-        std::string fd_filename = "hessian/fd_" + std::to_string(ii) + ".txt";
-        std::ofstream write_fd;
-        write_fd.open(fd_filename);
-        write_fd << std::setprecision(20);
-        for (int i = 0; i < hessian_fd.rows(); i++)
-        {
-            for (int j = 0; j < hessian_fd.cols(); j++)
-            {
-                if (hessian_fd(i, j) != 0)
-                {
-                    write_fd << i+1 << "\t" << j+1 << "\t" << hessian_fd(i, j) << std::endl;
-                }
-            }
-        }    
+        // Xd hessian_fd(cur_uv.size(), cur_uv.size());
+        // spXd tmp;
+        // Xd newx;
+        // for (int i = 0; i < cur_uv.size(); i++)
+        // {
+        //     // std::cout << "hello";
+        //     Vd newgrad;
+        //     newx = cur_uv;
+        //     newx(i % 3, i / 3) += 1e-8;
+        //     get_grad_and_hessian(G, dblarea, newx, newgrad, tmp);
+        //     hessian_fd.col(i) = (newgrad - gradE) / 1e-8; 
+        // }
+        // hessian_fd.col(0).setConstant(0);
+        // hessian_fd.row(0).setConstant(0);
+        // hessian_fd.col(V.rows()).setConstant(0);
+        // hessian_fd.row(V.rows()).setConstant(0);
+        // hessian_fd(0,0) = 1;
+        // hessian_fd(V.rows(), V.rows()) = 1;
+        // std::string fd_filename = "hessian/fd_" + std::to_string(ii) + ".txt";
+        // std::ofstream write_fd;
+        // write_fd.open(fd_filename);
+        // write_fd << std::setprecision(20);
+        // for (int i = 0; i < hessian_fd.rows(); i++)
+        // {
+        //     for (int j = 0; j < hessian_fd.cols(); j++)
+        //     {
+        //         if (hessian_fd(i, j) != 0)
+        //         {
+        //             write_fd << i+1 << "\t" << j+1 << "\t" << hessian_fd(i, j) << std::endl;
+        //         }
+        //     }
+        // }    
 
 
 
@@ -516,11 +517,11 @@ int main(int argc, char *argv[])
         std::cout << "neton_dec^2 = " << newton_dec2 << std::endl;
         std::cout << "#fl = " << n_flip << std::endl;
         std::cout << "lambda = " << lambda << std::endl;
-        std::cout << "uv = \n";
-        for (int kk = 0; kk < cur_uv.rows(); kk++)
-        {
-            std::cout << cur_uv.row(kk) << std::endl;
-        }
+        // std::cout << "uv = \n";
+        // for (int kk = 0; kk < cur_uv.rows(); kk++)
+        // {
+        //     std::cout << cur_uv.row(kk) << std::endl;
+        // }
 
         writecsv << std::setprecision(20) << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << "," << new_dir.norm() << "," << gradL.norm() << "," << newton_dec2 << "," << lambda << "," << n_flip << std::endl;
         // if (std::abs(energy - 4) < 1e-10)
