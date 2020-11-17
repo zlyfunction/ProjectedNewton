@@ -78,6 +78,18 @@ void prepare(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, spXd &Dx,
     Eigen::SparseMatrix<double> G;
     // igl::grad(V, F, G);
     igl::grad(V, F, G, true); // use uniform mesh instead of V
+    // modify F1, F2 to get the right Dx, Dy
+    std::cout << "F1 before" << F1 << std::endl;
+    F1.col(0).setConstant(1);
+    F1.col(1).setConstant(0);
+    F1.col(2).setConstant(0);
+    std::cout << "F1 after" << F1 << std::endl;
+
+    std::cout << "F2 before" << F2 << std::endl;
+    F2.col(0).setConstant(0);
+    F2.col(1).setConstant(1);
+    F2.col(2).setConstant(0);
+    std::cout << "F2 after" << F2 << std::endl;
     auto face_proj = [](Eigen::MatrixXd &F) {
         std::vector<Eigen::Triplet<double>> IJV;
         int f_num = F.rows();
@@ -303,10 +315,11 @@ int main(int argc, char *argv[])
     dblarea.setConstant(1); // set area to be a constant
     mesh_area = dblarea.sum();
     
+    
     spXd Dx, Dy, G;
     prepare(V, F, Dx, Dy);
     G = combine_Dx_Dy(Dx, Dy);
-
+    std::cout << G.rows() << " " << G.cols() << std::endl;
     int start_iter = 0;
     Xd cur_uv;
     if (argc > 2)
@@ -324,6 +337,7 @@ int main(int argc, char *argv[])
     auto compute_energy = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa) {
         Xd Ji;
         jacobian_from_uv(G, aaa, Ji);
+        // std::cout << Ji << std::endl;
         return compute_energy_from_jacobian(Ji, dblarea);
     };
 

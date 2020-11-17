@@ -49,7 +49,12 @@ void prepare(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, spXd &Dx,
         P.setFromTriplets(IJV.begin(), IJV.end());
         return P;
     };
-
+    F1.col(0).setConstant(1);
+    F1.col(1).setConstant(0);
+    F1.col(2).setConstant(0);
+    F2.col(0).setConstant(0);
+    F2.col(1).setConstant(1);
+    F2.col(2).setConstant(0);
     Dx = face_proj(F1) * G;
     Dy = face_proj(F2) * G;
 }
