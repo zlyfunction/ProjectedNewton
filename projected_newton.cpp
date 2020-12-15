@@ -65,8 +65,8 @@ namespace desai
 
 double compute_energy_from_jacobian(const Xd &J, const Vd &area)
 {
-  // return symmetric_dirichlet_energy(J.col(0), J.col(1), J.col(2), J.col(3)).dot(area) / area.sum();
-  return symmetric_dirichlet_energy(J.col(0), J.col(1), J.col(2), J.col(3)).dot(Eigen::VectorXd::Ones(area.rows())) / area.rows(); // uniform
+  return symmetric_dirichlet_energy(J.col(0), J.col(1), J.col(2), J.col(3)).dot(area) / area.sum();
+  // return symmetric_dirichlet_energy(J.col(0), J.col(1), J.col(2), J.col(3)).dot(Eigen::VectorXd::Ones(area.rows())) / area.rows(); // uniform
 }
 
 extern long global_autodiff_time;
@@ -186,6 +186,7 @@ int check_flip(const Eigen::MatrixXd &uv, const Eigen::MatrixXi &Fn)
     // std::cout << c[0] << " " << c[1] << std::endl;
     if (igl::copyleft::cgal::orient2D(a, b, c) <= 0)
     {
+      // std::cout << "flip @ triangle: " << i << std::endl;
       fl++;
     }
   }

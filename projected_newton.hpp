@@ -33,6 +33,7 @@ inline auto symmetric_dirichlet_energy(const Eigen::MatrixBase<Derived> &a,
   // std::cout << "det " << det << "\nfrob2 " << frob2 << std::endl;
   auto frob2_inv = a.array().abs2() * det.abs2().inverse() + b.array().abs2() * det.abs2().inverse()+ c.array().abs2() * det.abs2().inverse()+ d.array().abs2()* det.abs2().inverse();
   // return (frob2 * (1 + (det).abs2().inverse())).matrix();
+  
   return (frob2 + frob2_inv).matrix();
 }
 

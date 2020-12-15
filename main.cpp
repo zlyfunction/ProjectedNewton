@@ -27,15 +27,17 @@
 #include "projected_newton.hpp"
 
 #include <fstream>
-
-void prepare(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, spXd &Dx,
+#include <igl/triangle_triangle_adjacency.h>
+void prepare(const Eigen::MatrixXd &V, Eigen::MatrixXi &F, const std::vector<double> &trg, spXd &Dx,
              spXd &Dy)
 {
-    Eigen::MatrixXd F1, F2, F3;
+    Eigen::MatrixXd F1(F.rows(), 3), F2(F.rows(), 3), F3(F.rows(), 3);
     igl::local_basis(V, F, F1, F2, F3);
     Eigen::SparseMatrix<double> G;
+
+    igl::grad_plastic(V, F, trg, G);
     // igl::grad(V, F, G);
-    igl::grad(V, F, G, true); // use uniform mesh instead of V
+    // igl::grad(V, F, G, true); // use uniform mesh instead of V
     auto face_proj = [](Eigen::MatrixXd &F) {
         std::vector<Eigen::Triplet<double>> IJV;
         int f_num = F.rows();
@@ -55,6 +57,7 @@ void prepare(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, spXd &Dx,
     F2.col(0).setConstant(0);
     F2.col(1).setConstant(1);
     F2.col(2).setConstant(0);
+
     Dx = face_proj(F1) * G;
     Dy = face_proj(F2) * G;
 }
@@ -67,25 +70,6 @@ spXd combine_Dx_Dy(const spXd &Dx, const spXd &Dy)
     // gruesom way for Kronecker product.
     return igl::cat(1, igl::cat(2, hstack, empty), igl::cat(2, empty, hstack));
 }
-
-// #include <igl/slim.h>
-// Xd timing_slim(const Xd &V, const Xi &F, const Xd &uv)
-// {
-//     igl::SLIMData data;
-//     Eigen::VectorXi b;
-//     Xd bc;
-//     igl::Timer timer;
-//     timer.start();
-//     igl::slim_precompute(V, F, uv, data,
-//                          igl::MappingEnergyType::SYMMETRIC_DIRICHLET, b, bc, 0.);
-//     for (int i = 0; i < 100; i++)
-//     {
-//         igl::slim_solve(data, 1);
-//         std::cout << "SLIM e=" << data.energy
-//                   << "\tTimer:" << timer.getElapsedTime() << std::endl;
-//     }
-//     return data.V_o;
-// }
 
 void buildAeq(
     const Eigen::MatrixXi &cut,
@@ -243,7 +227,7 @@ int main(int argc, char *argv[])
     Eigen::VectorXi bnd;
     Xd bnd_uv;
     double mesh_area;
-    Xd CN;
+    Xd CN, scale;
     Xi FN, FTC;
     Xi cut;
 
@@ -251,53 +235,47 @@ int main(int argc, char *argv[])
     igl::deserialize(F, "F", model);
     igl::deserialize(uv_init, "uv", model);
     igl::deserialize(V, "V", model);
+    for (int i = 0; i < V.rows(); i++)
+    {
+        for (int j = 0; j < V.cols(); j++)
+        {
+            if (abs(V(i, j)) < 1e-15)
+                V(i, j) = 0;
+        }
+    }
 
     // deserialize cut
     igl::deserialize(cut, "cut", model);
+    igl::deserialize(scale, "scale", model);
     std::cout << F.rows() << " " << uv_init.rows() << " " << V.rows() << " " << cut.rows() << std::endl;
     spXd Aeq;
     buildAeq(cut, uv_init, F, Aeq);
+
     spXd AeqT = Aeq.transpose();
     Vd dblarea_uv;
     igl::doublearea(uv_init, F, dblarea_uv);
     igl::writeOBJ("input_init.obj", V, F, CN, FN, uv_init, F);
 
+    std::cout << "#fl = " << check_flip(uv_init, F);
     Vd dblarea;
     igl::doublearea(V, F, dblarea);
     dblarea.setConstant(sqrt(3) / 4);
     dblarea *= 0.5;
     mesh_area = dblarea.sum();
 
-    for (int i = 0; i < F.rows(); i++)
-    {
-        double max_e = (uv_init(F(i, 0), 0) - uv_init(F(i, 1), 0)) * (uv_init(F(i, 0), 0) - uv_init(F(i, 1), 0)) + (uv_init(F(i, 0), 1) - uv_init(F(i, 1), 1)) * (uv_init(F(i, 0), 1) - uv_init(F(i, 1), 1));
-        for (int j = 1; j < 3; j++)
-        {
-            double tmp = (uv_init(F(i, j), 0) - uv_init(F(i, (j + 1) % 3), 0)) * (uv_init(F(i, j), 0) - uv_init(F(i, (j + 1) % 3), 0)) + (uv_init(F(i, j), 1) - uv_init(F(i, (j + 1) % 3), 1)) * (uv_init(F(i, j), 1) - uv_init(F(i, (j + 1) % 3), 1));
-            if (tmp > max_e)
-            {
-                max_e = tmp;
-            }
-        }
-        std::cout << i << ": " << std::setprecision(17) << max_e / dblarea_uv(i) << std::endl;
-    }
-
-    // check 63
-    // std::cout << "check triangle #63\n";
-    // for (int i = 0; i < 3; i++)
+    // for (int i = 0; i < F.rows(); i++)
     // {
-    //     std::cout << (V.row(F(63, i)) - V.row(F(63, (i+1)%3))).norm() << " ";
+    //     double max_e = (uv_init(F(i, 0), 0) - uv_init(F(i, 1), 0)) * (uv_init(F(i, 0), 0) - uv_init(F(i, 1), 0)) + (uv_init(F(i, 0), 1) - uv_init(F(i, 1), 1)) * (uv_init(F(i, 0), 1) - uv_init(F(i, 1), 1));
+    //     for (int j = 1; j < 3; j++)
+    //     {
+    //         double tmp = (uv_init(F(i, j), 0) - uv_init(F(i, (j + 1) % 3), 0)) * (uv_init(F(i, j), 0) - uv_init(F(i, (j + 1) % 3), 0)) + (uv_init(F(i, j), 1) - uv_init(F(i, (j + 1) % 3), 1)) * (uv_init(F(i, j), 1) - uv_init(F(i, (j + 1) % 3), 1));
+    //         if (tmp > max_e)
+    //         {
+    //             max_e = tmp;
+    //         }
+    //     }
+    //     std::cout << i << ": " << std::setprecision(17) << max_e / dblarea_uv(i) << std::endl;
     // }
-    // std::cout << "\tarea" << dblarea(63) << std::endl;
-    // for (int i = 0; i < 3; i++)
-    // {
-    //     std::cout << (uv_init.row(F(63, i)) - uv_init.row(F(63, (i+1)%3))).norm() << " ";
-    // }
-    // std::cout << "\tarea" << dblarea_uv(63) << std::endl;
-
-    spXd Dx, Dy, G;
-    prepare(V, F, Dx, Dy);
-    G = combine_Dx_Dy(Dx, Dy);
 
     int start_iter = 0;
     Xd cur_uv;
@@ -312,6 +290,40 @@ int main(int argc, char *argv[])
     {
         cur_uv = uv_init;
     }
+
+    // prepare
+    Xd V_uv = cur_uv;
+    V_uv.conservativeResize(cur_uv.rows(), 3);
+    V_uv.col(2).setConstant(0);
+    // build target
+    // TODO: get the right number for this part
+    std::vector<double> trg(F.rows(), 0);
+    Xi TT;
+    igl::triangle_triangle_adjacency(F, TT);
+    for (int i = 0; i < trg.size(); i++)
+    {
+        for (int j = 0; j < 3; j++)
+        {
+            if (TT(i, j) == -1)
+            {
+                trg[i] = scale(F(i, j), F(i,(j+1) % 3));
+                // trg[i] = 1;
+                std::cout << i << " " << trg[i] << std::endl;
+            }
+        }
+     
+    }
+    spXd Dx, Dy, G;
+    prepare(V_uv, F, trg, Dx, Dy);
+    G = combine_Dx_Dy(Dx, Dy);
+    // update area
+    igl::doublearea(cur_uv, F, dblarea);
+    for (int i = 0; i < F.rows(); i++)
+    {
+        if (trg[i] != 0)
+            dblarea(i) = trg[i] * trg[i] * sqrt(3) / 2;
+    }
+    dblarea = dblarea / 2;
 
     auto compute_energy = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa) {
         Xd Ji;
@@ -333,7 +345,7 @@ int main(int argc, char *argv[])
         double max_e = E(0);
         for (int i = 0; i < E.size(); i++)
         {
-            // std::cout << "E(triangle " << i << "): " << E(i) << std::endl;
+            std::cout << "E(triangle " << i << "): " << E(i) << std::endl;
             if (E(i) > max_e)
             {
                 max_e = E(i);
@@ -360,20 +372,33 @@ int main(int argc, char *argv[])
     writecsv << "step,E_avg,E_max,step_size,|dir|,|gradL|,newton_dec^2,lambda,#flip" << std::endl;
     // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
-    for (int ii = start_iter + 1; ii < 275; ii++)
+    for (int ii = start_iter + 1; ii < 150; ii++)
     {
         spXd hessian;
         Vd gradE;
         std::cout << "\nIt" << ii << std::endl;
+
+        // prepare for each iteration
+        V_uv.conservativeResize(cur_uv.rows(), 3);
+        V_uv.col(2).setConstant(0);
+        prepare(V_uv, F, trg, Dx, Dy);
+        G = combine_Dx_Dy(Dx, Dy);
+        igl::doublearea(cur_uv, F, dblarea);
+        for (int i = 0; i < F.rows(); i++)
+        {
+            if (trg[i] != 0)
+                dblarea(i) = trg[i] * trg[i] * sqrt(3) / 2;
+        }
+        dblarea = dblarea / 2;
+
         get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
         std::string hessian_filename = "hessian/hessian_" + std::to_string(ii) + ".txt";
         write_hessian_to_file(hessian, hessian_filename);
-        
+
         std::string grad_filename = "hessian/gradE_" + std::to_string(ii) + ".txt";
         std::ofstream write_grad;
         write_grad.open(grad_filename);
         write_grad << std::setprecision(20) << gradE;
-        
 
         // do complete newton
         // spXd Id(hessian.rows(), hessian.cols());
@@ -415,8 +440,9 @@ int main(int argc, char *argv[])
         double newton_dec2 = newton.dot(hessian * newton);
         // energy = wolfe_linesearch(F, cur_uv, new_dir, compute_energy, gradE, energy, use_gd);
         double step_size;
+
         energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, compute_grad, gradE, energy, step_size);
-        get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
+        // get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
         Vd gradL = gradE + AeqT * w;
 
         double E_avg = compute_energy(cur_uv), E_max = compute_energy_max(cur_uv);
@@ -433,22 +459,7 @@ int main(int argc, char *argv[])
             // norm of the gradE
             // if (std::abs(energy - old_energy) < 1e-9)
             break;
-        // if (fabs(old_energy - energy) < 1e-16)
-        // {
-        //     lambda = lambda * 0.8;
-        //     std::cout << "lambda ->" << lambda << std::endl;
-        // }
-        // else
-        // {
-        //     lambda = lambda / 0.8 > 0.99 ? 0.99 : lambda / 0.8;
-        //     std::cout << "lambda ->" << lambda << std::endl;
-        // }
-
-        // if (lambda < 1e-12)
-        // {
-        //     std::cout << "lambda < 1e-12, break\n";
-        //     break;
-        // }
+ 
         old_energy = energy;
 
         // save the cur_uv
