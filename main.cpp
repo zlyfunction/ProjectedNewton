@@ -29,15 +29,21 @@
 #include <fstream>
 #include <igl/triangle_triangle_adjacency.h>
 void prepare(const Eigen::MatrixXd &V, Eigen::MatrixXi &F, const std::vector<double> &trg, spXd &Dx,
-             spXd &Dy)
+             spXd &Dy, bool uniform)
 {
     Eigen::MatrixXd F1(F.rows(), 3), F2(F.rows(), 3), F3(F.rows(), 3);
     igl::local_basis(V, F, F1, F2, F3);
     Eigen::SparseMatrix<double> G;
 
-    igl::grad_plastic(V, F, trg, G);
-    // igl::grad(V, F, G);
-    // igl::grad(V, F, G, true); // use uniform mesh instead of V
+    if (uniform)
+    {
+        igl::grad(V, F, G, true); // use uniform mesh instead of V
+    }
+    else
+    {
+        igl::grad_plastic(V, F, trg, G);
+    }
+
     auto face_proj = [](Eigen::MatrixXd &F) {
         std::vector<Eigen::Triplet<double>> IJV;
         int f_num = F.rows();
@@ -51,12 +57,30 @@ void prepare(const Eigen::MatrixXd &V, Eigen::MatrixXi &F, const std::vector<dou
         P.setFromTriplets(IJV.begin(), IJV.end());
         return P;
     };
-    F1.col(0).setConstant(1);
-    F1.col(1).setConstant(0);
-    F1.col(2).setConstant(0);
-    F2.col(0).setConstant(0);
-    F2.col(1).setConstant(1);
-    F2.col(2).setConstant(0);
+    if (uniform)
+    {
+        F1.col(0).setConstant(1);
+        F1.col(1).setConstant(0);
+        F1.col(2).setConstant(0);
+        F2.col(0).setConstant(0);
+        F2.col(1).setConstant(1);
+        F2.col(2).setConstant(0);
+    }
+    else
+    {
+        for (int i = 0; i < trg.size(); i++)
+        {
+            if (trg[i] != 0)
+            {
+                F1(i, 0) = 1;
+                F1(i, 1) = 0;
+                F1(i, 2) = 0;
+                F2(i, 0) = 0;
+                F2(i, 1) = 1;
+                F2(i, 2) = 0;
+            }
+        }
+    }
 
     Dx = face_proj(F1) * G;
     Dy = face_proj(F2) * G;
@@ -258,24 +282,6 @@ int main(int argc, char *argv[])
 
     std::cout << "#fl = " << check_flip(uv_init, F);
     Vd dblarea;
-    igl::doublearea(V, F, dblarea);
-    dblarea.setConstant(sqrt(3) / 4);
-    dblarea *= 0.5;
-    mesh_area = dblarea.sum();
-
-    // for (int i = 0; i < F.rows(); i++)
-    // {
-    //     double max_e = (uv_init(F(i, 0), 0) - uv_init(F(i, 1), 0)) * (uv_init(F(i, 0), 0) - uv_init(F(i, 1), 0)) + (uv_init(F(i, 0), 1) - uv_init(F(i, 1), 1)) * (uv_init(F(i, 0), 1) - uv_init(F(i, 1), 1));
-    //     for (int j = 1; j < 3; j++)
-    //     {
-    //         double tmp = (uv_init(F(i, j), 0) - uv_init(F(i, (j + 1) % 3), 0)) * (uv_init(F(i, j), 0) - uv_init(F(i, (j + 1) % 3), 0)) + (uv_init(F(i, j), 1) - uv_init(F(i, (j + 1) % 3), 1)) * (uv_init(F(i, j), 1) - uv_init(F(i, (j + 1) % 3), 1));
-    //         if (tmp > max_e)
-    //         {
-    //             max_e = tmp;
-    //         }
-    //     }
-    //     std::cout << i << ": " << std::setprecision(17) << max_e / dblarea_uv(i) << std::endl;
-    // }
 
     int start_iter = 0;
     Xd cur_uv;
@@ -296,34 +302,48 @@ int main(int argc, char *argv[])
     V_uv.conservativeResize(cur_uv.rows(), 3);
     V_uv.col(2).setConstant(0);
     // build target
-    // TODO: get the right number for this part
     std::vector<double> trg(F.rows(), 0);
     Xi TT;
     igl::triangle_triangle_adjacency(F, TT);
+    double sum1 = 0, sum2 = 0;
     for (int i = 0; i < trg.size(); i++)
     {
         for (int j = 0; j < 3; j++)
         {
             if (TT(i, j) == -1)
             {
-                trg[i] = scale(F(i, j), F(i,(j+1) % 3));
+                trg[i] = scale(F(i, j), F(i, (j + 1) % 3));
+                // trg[i] =1;
+                break;
+                // trg[i] = 0;
                 // trg[i] = 1;
-                std::cout << i << " " << trg[i] << std::endl;
+                // sum1 += trg[i];
+                // sum2 += (cur_uv.row(F(i,j)) - cur_uv.row(F(i, (j+1)%3))).norm();
             }
         }
-     
     }
+    // for (int i = 0; i < trg.size(); i++)
+    // {
+    //     if (trg[i] != 0)
+    //     {
+    //         trg[i] = trg[i] / sum1 * sum2;
+    //     }
+    //     for (int j = 0; j < 3; j++)
+    //     {
+    //         if (TT(i, j) == -1)
+    //         {
+    //             std::cout << "trg: " << trg[i] << "\treal: " <<  (cur_uv.row(F(i,j)) - cur_uv.row(F(i, (j+1)%3))).norm() << std::endl;
+    //         }
+    //     }
+    // }
     spXd Dx, Dy, G;
-    prepare(V_uv, F, trg, Dx, Dy);
+    prepare(V_uv, F, trg, Dx, Dy, true);
     G = combine_Dx_Dy(Dx, Dy);
     // update area
     igl::doublearea(cur_uv, F, dblarea);
-    for (int i = 0; i < F.rows(); i++)
-    {
-        if (trg[i] != 0)
-            dblarea(i) = trg[i] * trg[i] * sqrt(3) / 2;
-    }
+    dblarea.setConstant(sqrt(3) / 2);
     dblarea = dblarea / 2;
+    mesh_area = dblarea.sum();
 
     auto compute_energy = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa) {
         Xd Ji;
@@ -345,7 +365,7 @@ int main(int argc, char *argv[])
         double max_e = E(0);
         for (int i = 0; i < E.size(); i++)
         {
-            std::cout << "E(triangle " << i << "): " << E(i) << std::endl;
+            // std::cout << "E(triangle " << i << "): " << E(i) << std::endl;
             if (E(i) > max_e)
             {
                 max_e = E(i);
@@ -364,41 +384,91 @@ int main(int argc, char *argv[])
     std::cout << "Start Energy" << energy << std::endl;
     double old_energy = energy;
 
-    // double lambda = 0.999;
     double lambda = 1.0;
 
     std::ofstream writecsv;
     writecsv.open("log.csv");
-    writecsv << "step,E_avg,E_max,step_size,|dir|,|gradL|,newton_dec^2,lambda,#flip" << std::endl;
+    writecsv << "step,E_avg,E_max,step_size,|dir|,|gradL|,newton_dec^2,lambda,#flip,trg_diff_max,trg_diff_avg" << std::endl;
     // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
-    for (int ii = start_iter + 1; ii < 150; ii++)
+    for (int ii = start_iter + 1; ii < 1500; ii++)
     {
         spXd hessian;
         Vd gradE;
         std::cout << "\nIt" << ii << std::endl;
 
+        if (ii == 51)
+        {
+            double sum1 = 0, sum2 = 0;
+            for (int i = 0; i < trg.size(); i++)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    if (TT(i, j) == -1)
+                    {
+                        sum1 += trg[i] * trg[i];
+                        sum2 += ((cur_uv.row(F(i,j)) - cur_uv.row(F(i, (j+1)%3))).norm()) * trg[i];
+                    }
+                }
+            }
+            for (int i = 0; i < trg.size(); i++)
+            {
+                if (trg[i] != 0)
+                {
+                    trg[i] = trg[i] / sum1 * sum2;
+                }
+                for (int j = 0; j < 3; j++)
+                {
+                    if (TT(i, j) == -1)
+                    {
+                        std::cout << "trg: " << trg[i] << "\treal: " <<  (cur_uv.row(F(i,j)) - cur_uv.row(F(i, (j+1)%3))).norm() << std::endl;
+                    }
+                }
+            }
+        }
         // prepare for each iteration
+        V_uv = cur_uv;
         V_uv.conservativeResize(cur_uv.rows(), 3);
         V_uv.col(2).setConstant(0);
-        prepare(V_uv, F, trg, Dx, Dy);
+        if (ii < 51)
+        {
+            prepare(V_uv, F, trg, Dx, Dy, true);
+        }
+        else
+        {
+            prepare(V_uv, F, trg, Dx, Dy, false);
+        }
         G = combine_Dx_Dy(Dx, Dy);
-        igl::doublearea(cur_uv, F, dblarea);
+        Vd dblarea_tmp;
+        igl::doublearea(cur_uv, F, dblarea_tmp);
         for (int i = 0; i < F.rows(); i++)
         {
             if (trg[i] != 0)
                 dblarea(i) = trg[i] * trg[i] * sqrt(3) / 2;
+            else
+            {
+                dblarea(i) = dblarea_tmp(i);
+            }
         }
+        if (ii < 51)
+            dblarea.setConstant(sqrt(3) / 2);
         dblarea = dblarea / 2;
-
+        mesh_area = dblarea.sum();
+        if (ii == 51)
+        {
+            std::cout << "not uniform" << std::endl;
+            energy = compute_energy(cur_uv);
+            old_energy = energy;
+        }
         get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
-        std::string hessian_filename = "hessian/hessian_" + std::to_string(ii) + ".txt";
-        write_hessian_to_file(hessian, hessian_filename);
 
-        std::string grad_filename = "hessian/gradE_" + std::to_string(ii) + ".txt";
-        std::ofstream write_grad;
-        write_grad.open(grad_filename);
-        write_grad << std::setprecision(20) << gradE;
+        // write hessian and grad
+        // std::string hessian_filename = "hessian/hessian_" + std::to_string(ii) + ".txt";
+        // write_hessian_to_file(hessian, hessian_filename);
+        // std::string grad_filename = "hessian/gradE_" + std::to_string(ii) + ".txt";
+        // std::ofstream write_grad;
+        // write_grad.open(grad_filename);
+        // write_grad << std::setprecision(20) << gradE;
 
         // do complete newton
         // spXd Id(hessian.rows(), hessian.cols());
@@ -407,10 +477,9 @@ int main(int argc, char *argv[])
 
         spXd kkt(hessian.rows() + Aeq.rows(), hessian.cols() + Aeq.rows());
         buildkkt(hessian, Aeq, AeqT, kkt);
-        hessian_filename = "hessian/kkt_" + std::to_string(ii) + ".txt";
-        write_hessian_to_file(kkt, hessian_filename);
 
-        if (ii == start_iter + 1)
+        // if (ii == start_iter + 1)
+        if (true)
         {
             // solver.analyzePattern(hessian);
             solver.analyzePattern(kkt);
@@ -422,6 +491,7 @@ int main(int argc, char *argv[])
             gradE(i) = 0;
         }
         solver.factorize(kkt);
+        std::cout << "solver.info() = " << solver.info() << std::endl;
         Vd newton = solver.solve(gradE);
 
         Vd w = -newton.tail(newton.rows() - hessian.cols());
@@ -431,18 +501,14 @@ int main(int argc, char *argv[])
         if (solver.info() != Eigen::Success)
         {
             std::cout << "solver.info() = " << solver.info() << std::endl;
-            std::cout << "start using gd\n";
-            // use_gd = true;
-            // exit(1);
         }
+
         Xd new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton
         std::cout << "-gradE.dot(Dx) = " << newton.dot(gradE) << "\n";
         double newton_dec2 = newton.dot(hessian * newton);
-        // energy = wolfe_linesearch(F, cur_uv, new_dir, compute_energy, gradE, energy, use_gd);
         double step_size;
 
         energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, compute_grad, gradE, energy, step_size);
-        // get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
         Vd gradL = gradE + AeqT * w;
 
         double E_avg = compute_energy(cur_uv), E_max = compute_energy_max(cur_uv);
@@ -453,13 +519,32 @@ int main(int argc, char *argv[])
         std::cout << "neton_dec^2 = " << newton_dec2 << std::endl;
         std::cout << "#fl = " << n_flip << std::endl;
         std::cout << "lambda = " << lambda << std::endl;
-
-        writecsv << std::setprecision(20) << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << "," << new_dir.norm() << "," << gradL.norm() << "," << newton_dec2 << "," << lambda << "," << n_flip << std::endl;
+        double trg_diff_max = -1;
+        double trg_diff_sum = 0;
+        int count = 0;
+        for (int i = 0; i < F.rows(); i++)
+        {
+            for (int j = 0; j < 3; j++)
+            {
+                if (TT(i, j) == -1)
+                {
+                    double trg_diff = fabs((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() - trg[i]);
+                    if (trg_diff > trg_diff_max)
+                        trg_diff_max = trg_diff;
+                    trg_diff_sum += trg_diff;
+                    count++;
+                    break;
+                }
+            }
+        }
+        std::cout << "trg_diff_max = " << trg_diff_max << std::endl;
+        std::cout << "trg_diff_avg = " << trg_diff_sum / count << std::endl;
+        writecsv << std::setprecision(20) << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << "," << new_dir.norm() << "," << gradL.norm() << "," << newton_dec2 << "," << lambda << "," << n_flip << "," << trg_diff_max << "," << trg_diff_sum / count << std::endl;
         if (std::abs(energy - 4) < 1e-10)
             // norm of the gradE
             // if (std::abs(energy - old_energy) < 1e-9)
             break;
- 
+
         old_energy = energy;
 
         // save the cur_uv

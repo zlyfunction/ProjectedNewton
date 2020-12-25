@@ -242,7 +242,8 @@ double bi_linesearch(
     }
     if (step_size == 0)
     {
-      break;
+      // break;
+      return new_energy;
     }
     // std::cout << "energy did not decrease, step_size/=2\n";
   }
