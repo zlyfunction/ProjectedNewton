@@ -388,15 +388,15 @@ int main(int argc, char *argv[])
 
     std::ofstream writecsv;
     writecsv.open("log.csv");
-    writecsv << "step,E_avg,E_max,step_size,|dir|,|gradL|,newton_dec^2,lambda,#flip,trg_diff_max,trg_diff_avg" << std::endl;
+    writecsv << "step,E_avg,E_max,step_size,|dir|,|gradL|,newton_dec^2,lambda,#flip,trg_diff_max,trg_diff_avg,ratio_min,ratio_max,ratio_avg" << std::endl;
     // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
-    for (int ii = start_iter + 1; ii < 1500; ii++)
+
+    for (int ii = start_iter + 1; ii < 250; ii++)
     {
         spXd hessian;
         Vd gradE;
         std::cout << "\nIt" << ii << std::endl;
-
         if (ii == 51)
         {
             double sum1 = 0, sum2 = 0;
@@ -407,7 +407,7 @@ int main(int argc, char *argv[])
                     if (TT(i, j) == -1)
                     {
                         sum1 += trg[i] * trg[i];
-                        sum2 += ((cur_uv.row(F(i,j)) - cur_uv.row(F(i, (j+1)%3))).norm()) * trg[i];
+                        sum2 += ((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm()) * trg[i];
                     }
                 }
             }
@@ -421,7 +421,7 @@ int main(int argc, char *argv[])
                 {
                     if (TT(i, j) == -1)
                     {
-                        std::cout << "trg: " << trg[i] << "\treal: " <<  (cur_uv.row(F(i,j)) - cur_uv.row(F(i, (j+1)%3))).norm() << std::endl;
+                        std::cout << "trg: " << trg[i] << "\treal: " << (cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() << std::endl;
                     }
                 }
             }
@@ -454,26 +454,12 @@ int main(int argc, char *argv[])
             dblarea.setConstant(sqrt(3) / 2);
         dblarea = dblarea / 2;
         mesh_area = dblarea.sum();
-        if (ii == 51)
+        if (ii >= 51)
         {
-            std::cout << "not uniform" << std::endl;
             energy = compute_energy(cur_uv);
             old_energy = energy;
         }
         get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
-
-        // write hessian and grad
-        // std::string hessian_filename = "hessian/hessian_" + std::to_string(ii) + ".txt";
-        // write_hessian_to_file(hessian, hessian_filename);
-        // std::string grad_filename = "hessian/gradE_" + std::to_string(ii) + ".txt";
-        // std::ofstream write_grad;
-        // write_grad.open(grad_filename);
-        // write_grad << std::setprecision(20) << gradE;
-
-        // do complete newton
-        // spXd Id(hessian.rows(), hessian.cols());
-        // Id.setIdentity();
-        // hessian = lambda * hessian + (1 - lambda) * Id;
 
         spXd kkt(hessian.rows() + Aeq.rows(), hessian.cols() + Aeq.rows());
         buildkkt(hessian, Aeq, AeqT, kkt);
@@ -507,7 +493,6 @@ int main(int argc, char *argv[])
         std::cout << "-gradE.dot(Dx) = " << newton.dot(gradE) << "\n";
         double newton_dec2 = newton.dot(hessian * newton);
         double step_size;
-
         energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, compute_grad, gradE, energy, step_size);
         Vd gradL = gradE + AeqT * w;
 
@@ -521,6 +506,9 @@ int main(int argc, char *argv[])
         std::cout << "lambda = " << lambda << std::endl;
         double trg_diff_max = -1;
         double trg_diff_sum = 0;
+        double ratio_max = -1;
+        double ratio_min = 1e10;
+        double ratio_sum = 0;
         int count = 0;
         for (int i = 0; i < F.rows(); i++)
         {
@@ -528,25 +516,33 @@ int main(int argc, char *argv[])
             {
                 if (TT(i, j) == -1)
                 {
+                    double ratio = (cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() / trg[i];
                     double trg_diff = fabs((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() - trg[i]);
                     if (trg_diff > trg_diff_max)
                         trg_diff_max = trg_diff;
+                    if (ratio > ratio_max)
+                        ratio_max = ratio;
+                    if (ratio < ratio_min)
+                        ratio_min = ratio;
+                    ratio_sum += ratio;
                     trg_diff_sum += trg_diff;
                     count++;
-                    break;
                 }
             }
         }
         std::cout << "trg_diff_max = " << trg_diff_max << std::endl;
         std::cout << "trg_diff_avg = " << trg_diff_sum / count << std::endl;
-        writecsv << std::setprecision(20) << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << "," << new_dir.norm() << "," << gradL.norm() << "," << newton_dec2 << "," << lambda << "," << n_flip << "," << trg_diff_max << "," << trg_diff_sum / count << std::endl;
+        std::cout << "ratio_min = " << ratio_min << std::endl;
+        std::cout << "ratio_max = " << ratio_max << std::endl;
+        std::cout << "ratio_avg = " << ratio_sum / count << std::endl;
+        writecsv << std::setprecision(20) << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << "," << new_dir.norm() << "," << gradL.norm() << "," << newton_dec2 << "," << lambda << "," << n_flip << "," << trg_diff_max << "," << trg_diff_sum / count << ","
+                 << ratio_min << "," << ratio_max << "," << ratio_sum / count << std::endl;
         if (std::abs(energy - 4) < 1e-10)
             // norm of the gradE
             // if (std::abs(energy - old_energy) < 1e-9)
             break;
 
         old_energy = energy;
-
         // save the cur_uv
         std::string outfilename = "./serialized/cur_uv_step" + std::to_string(ii);
         igl::serialize(cur_uv, "cur_uv", outfilename, true);

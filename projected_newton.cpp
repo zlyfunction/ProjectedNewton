@@ -225,7 +225,7 @@ double bi_linesearch(
 
     // test line search
     // std::cout << "step_size = " << step_size << "\t";
-    // std::cout << "new_energy = " << new_energy << "\t";
+    // std::cout << "energy0 = " << energy0 <<"\tnew_energy = " << new_energy << "\n";
     // Eigen::VectorXd new_gradE = get_grad(newx);
     // std::cout << "grad.dot(d) = " << new_gradE.dot(flat_d) << "\t";
     // std::cout << "grad:\n" << new_gradE << std::endl;
@@ -242,8 +242,8 @@ double bi_linesearch(
     }
     if (step_size == 0)
     {
-      // break;
-      return new_energy;
+      break;
+      // return new_energy;
     }
     // std::cout << "energy did not decrease, step_size/=2\n";
   }
