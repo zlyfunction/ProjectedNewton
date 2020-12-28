@@ -5,8 +5,8 @@
 #include <igl/opengl/glfw/imgui/ImGuiMenu.h>
 #include <igl/opengl/glfw/imgui/ImGuiHelpers.h>
 #include <igl/colormap.h>
+#include <igl/triangle_triangle_adjacency.h>
 #include "plot.h"
-
 // this functio is only for knot1 model
 void build_for_vis(const Eigen::MatrixXi &cut, std::vector<std::vector<std::pair<int, int>>> &all_pairs, std::vector<Eigen::MatrixXd> &all_colors)
 {
@@ -158,22 +158,18 @@ int main(int argc, char *argv[])
     Eigen::MatrixXi F, Fuv, FN;
     Eigen::MatrixXd V, CN;
     Eigen::MatrixXd uv, cur_uv;
-    igl::readOBJ(model, V, uv, CN, F, Fuv, FN);
+    // igl::readOBJ(model, V, uv, CN, F, Fuv, FN);
 
     // for visualization
     Eigen::MatrixXi cut;
     Eigen::VectorXd S;
-    igl::deserialize(cut, "cut", "/Users/leyi/re1/seamless_signature/build/padding/knot1_forslim_serialized", true);
-    igl::deserialize(S, "S", "/Users/leyi/re1/seamless_signature/build/padding/knot1_forslim_serialized", true);
+    igl::deserialize(F, "F", model);
+    igl::deserialize(uv, "uv", model);
+    igl::deserialize(V, "V", model);
 
-    // std::cout << "cut" << cut.rows() << std::endl;
-    std::cout << "S " << S.rows() << std::endl;
-    std::cout << "V " << V.rows() << std::endl;
-    // check_flip(uv, F);
-    Eigen::VectorXd Energy(F.rows());
+    // Eigen::VectorXd Energy(F.rows());
     Eigen::MatrixXd color(F.rows(), 3);
-    igl::doublearea(V, F, dblarea_3d);
-    // igl::doublearea(uv, F, dblarea_uv);
+    // igl::doublearea(V, F, dblarea_3d);
     int start_iter = 0;
     if (argc > 2)
     {
@@ -186,35 +182,19 @@ int main(int argc, char *argv[])
     {
         cur_uv = uv;
     }
-    igl::doublearea(cur_uv, F, dblarea_uv);
 
-    // compute area distortion
-    // double r = dblarea_3d.sum() / dblarea_uv.sum();
-    // std::cout << std::setprecision(17) << "area_3d : area_uv = " << r << std::endl;
-    // for (int i = 0; i < F.rows(); i++)
-    // {
-    //     Energy(i) = dblarea_uv(i) / dblarea_3d(i) * r;
-    //     if (Energy(i) < 0 || Energy(i) > 3)
-    //     {
-    //         std::cout << std::setprecision(16) << dblarea_uv(i) << "\t" << dblarea_3d(i) << "\t" << Energy(i) << std::endl;
-    //     }
-    // }
-
-    // for (int i = 0; i < F.rows(); i++)
-    // {
-    //     double max_e = (cur_uv(F(i,0), 0) - cur_uv(F(i, 1), 0)) * (cur_uv(F(i,0), 0) - cur_uv(F(i, 1), 0)) + (cur_uv(F(i,0), 1) - cur_uv(F(i, 1), 1)) * (cur_uv(F(i,0), 1) - cur_uv(F(i, 1), 1));
-    //     for (int j = 1; j < 3; j++)
-    //     {
-    //         double tmp = (cur_uv(F(i,j), 0) - cur_uv(F(i, (j+1)%3), 0)) * (cur_uv(F(i,j), 0) - cur_uv(F(i, (j+1)%3), 0)) + (cur_uv(F(i,j), 1) - cur_uv(F(i, (j+1)%3), 1)) * (cur_uv(F(i,j), 1) - cur_uv(F(i, (j+1)%3), 1));
-    //         if (tmp > max_e)
-    //         {
-    //             max_e = tmp;
-    //         }
-    //     }
-    //     std::cout << i << ' ' << std::setprecision(17) << max_e / dblarea_uv(i) << std::endl;
-    // }
-
-    // igl::colormap(igl::COLOR_MAP_TYPE_JET, Energy, true, color);
+    Eigen::MatrixXi TT;
+    igl::triangle_triangle_adjacency(F, TT);
+    for (int i = 0; i < F.rows(); i++)
+    {
+        color.row(i) << 0,1,1;
+        for (int j = 0; j < 3; j++)
+        {
+            if (TT(i, j) == -1)
+                color.row(i) << 1, 0, 0;
+        }
+    }
+ 
 
     std::vector<std::vector<std::pair<int, int>>> all_pairs(5);
     std::vector<Eigen::MatrixXd> all_colors(5);
@@ -229,8 +209,8 @@ int main(int argc, char *argv[])
     }
 
     igl::opengl::glfw::Viewer viewer;
-    viewer.data().set_mesh(V, F);
-    viewer.data().set_uv(cur_uv * 40);
+    // viewer.data().set_mesh(V, F);
+    // viewer.data().set_uv(cur_uv * 40);
     // viewer.data().set_colors(color);
     igl::opengl::glfw::imgui::ImGuiMenu menu;
     viewer.plugins.push_back(&menu);
@@ -250,7 +230,7 @@ int main(int argc, char *argv[])
                 }
                 plot_singularity(viewer, cur_uv, F, S, 0.2);
             }
-
+            viewer.data().set_colors(color);
             viewer.core().align_camera_center(cur_uv, F);
             viewer.selected_data_index = 0;
         }
@@ -283,7 +263,7 @@ int main(int argc, char *argv[])
                 }
                 plot_singularity(viewer, cur_uv, F, S, 0.2);
             }
-
+            viewer.data().set_colors(color);
             viewer.selected_data_index = 0;
             // viewer.core().align_camera_center(cur_uv, F);
         }
