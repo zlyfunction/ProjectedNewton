@@ -305,19 +305,26 @@ int main(int argc, char *argv[])
     V_uv.conservativeResize(cur_uv.rows(), 3);
     V_uv.col(2).setConstant(0);
     // build target
-    std::vector<double> trg(F.rows(), 0);
+    std::vector<double> trg(F.rows() * 3, 0);
     Xi TT;
     igl::triangle_triangle_adjacency(F, TT);
-    
+
+    // TODO: add support for 2-trg-edge triangles
     for (int i = 0; i < F.rows(); i++)
     {
         for (int j = 0; j < 3; j++)
         {
             if (TT(i, j) == -1)
             {
-                trg[i] = scale(F(i, j), F(i, (j + 1) % 3));
-                // trg[i] = 1;
-                break;
+                if (trg[i] == 0)
+                    trg[i] = scale(F(i, j), F(i, (j + 1) % 3));
+                else
+                {
+                    trg[i + F.rows()] = trg[i];
+                    trg[i + 2 * F.rows()] = scale(F(i, j), F(i, (j + 1) % 3));
+                    trg[i] = -1;
+                    std::cout << "triangle " << i << " : " << trg[i + F.rows()] << " " << trg[i + F.rows() * 2] << std::endl;
+                }
             }
         }
     }
@@ -395,8 +402,6 @@ int main(int argc, char *argv[])
     // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
 
-
-
     // start!!
     for (int ii = start_iter + 1; ii < 300; ii++)
     {
@@ -406,30 +411,46 @@ int main(int argc, char *argv[])
         if (ii == 51) // adjust the targets to LS
         {
             double sum1 = 0, sum2 = 0;
-            for (int i = 0; i < trg.size(); i++)
+            for (int i = 0; i < F.rows(); i++)
             {
-                for (int j = 0; j < 3; j++)
+                if (trg[i] > 0)
                 {
-                    if (TT(i, j) == -1)
+                    for (int j = 0; j < 3; j++)
                     {
-                        sum1 += trg[i] * trg[i];
-                        sum2 += ((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm()) * trg[i];
+                        if (TT(i, j) == -1)
+                        {
+                            sum1 += trg[i] * trg[i];
+                            sum2 += ((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm()) * trg[i];
+                        }
+                    }
+                }
+                else
+                {
+                    int k = 0;
+                    for (int j = 0; j < 3; j++)
+                    {
+                        if (TT(i, j) == -1)
+                        {
+                            k++;
+                            sum1 += trg[k * F.rows() + i] * trg[k * F.rows() + i];
+                            sum2 += ((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm()) * trg[k * F.rows() + i];
+                        }
                     }
                 }
             }
             for (int i = 0; i < trg.size(); i++)
             {
-                if (trg[i] != 0)
+                if (trg[i] > 0)
                 {
                     trg[i] = trg[i] / sum1 * sum2;
                 }
-                for (int j = 0; j < 3; j++)
-                {
-                    if (TT(i, j) == -1)
-                    {
-                        std::cout << "trg: " << trg[i] << "\treal: " << (cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() << std::endl;
-                    }
-                }
+                // for (int j = 0; j < 3; j++)
+                // {
+                //     if (TT(i, j) == -1)
+                //     {
+                //         std::cout << "trg: " << trg[i] << "\treal: " << (cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() << std::endl;
+                //     }
+                // }
             }
         }
         // prepare for each iteration
@@ -447,11 +468,15 @@ int main(int argc, char *argv[])
             prepare(V_uv, F, trg, dblarea_tmp, Dx, Dy, false);
         }
         G = combine_Dx_Dy(Dx, Dy);
-        
+
         for (int i = 0; i < F.rows(); i++)
         {
-            if (trg[i] != 0)
+            if (trg[i] > 0)
                 dblarea(i) = trg[i] * trg[i] * sqrt(3) / 2;
+            else if (trg[i] == -1)
+            {
+                dblarea(i) = trg[i + F.rows()] * trg[i + 2 * F.rows()] * sqrt(3) / 2;
+            }
             else if (dblarea_tmp(i) > eps)
             {
                 dblarea(i) = dblarea_tmp(i);
@@ -460,9 +485,8 @@ int main(int argc, char *argv[])
             {
                 dblarea(i) = eps;
             }
-            
         }
-        if (ii < 51)
+        if (ii < 51) // set the are to be uniform
             dblarea.setConstant(sqrt(3) / 2);
         dblarea = dblarea / 2;
         mesh_area = dblarea.sum();
@@ -477,14 +501,14 @@ int main(int argc, char *argv[])
         buildkkt(hessian, Aeq, AeqT, kkt);
 
         solver.analyzePattern(kkt); // analyze pattern for each iteration
-        
+
         // resize gradE
         gradE.conservativeResize(kkt.cols());
         for (int i = hessian.cols(); i < kkt.cols(); i++)
         {
             gradE(i) = 0;
         }
-        
+
         // solve
         solver.factorize(kkt);
         std::cout << "solver.info() = " << solver.info() << std::endl;
@@ -499,7 +523,7 @@ int main(int argc, char *argv[])
         double newton_dec2 = newton.dot(hessian * newton);
         double step_size;
         energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, compute_grad, gradE, energy, step_size);
-        
+
         Vd gradL = gradE + AeqT * w;
 
         double E_avg = compute_energy_no_plastic(cur_uv), E_max = compute_energy_max(cur_uv);
@@ -510,8 +534,7 @@ int main(int argc, char *argv[])
         std::cout << "neton_dec^2 = " << newton_dec2 << std::endl;
         std::cout << "#fl = " << n_flip << std::endl;
         std::cout << "lambda = " << lambda << std::endl;
-        
-        
+
         // compare bd edge length with targets
         double trg_diff_max = -1;
         double trg_diff_sum = 0;
@@ -521,21 +544,46 @@ int main(int argc, char *argv[])
         int count = 0;
         for (int i = 0; i < F.rows(); i++)
         {
-            for (int j = 0; j < 3; j++)
+            if (trg[i] > 0)
             {
-                if (TT(i, j) == -1)
+                for (int j = 0; j < 3; j++)
                 {
-                    double ratio = (cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() / trg[i];
-                    double trg_diff = fabs((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() - trg[i]);
-                    if (trg_diff > trg_diff_max)
-                        trg_diff_max = trg_diff;
-                    if (ratio > ratio_max)
-                        ratio_max = ratio;
-                    if (ratio < ratio_min)
-                        ratio_min = ratio;
-                    ratio_sum += ratio;
-                    trg_diff_sum += trg_diff;
-                    count++;
+                    if (TT(i, j) == -1)
+                    {
+                        double ratio = (cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() / trg[i];
+                        double trg_diff = fabs((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() - trg[i]);
+                        if (trg_diff > trg_diff_max)
+                            trg_diff_max = trg_diff;
+                        if (ratio > ratio_max)
+                            ratio_max = ratio;
+                        if (ratio < ratio_min)
+                            ratio_min = ratio;
+                        ratio_sum += ratio;
+                        trg_diff_sum += trg_diff;
+                        count++;
+                    }
+                }
+            }
+            else if (trg[i] == -1)
+            {
+                int k = 0;
+                for (int j = 0; j < 3; j++)
+                {
+                    if (TT(i, j) == -1)
+                    {
+                        k++;
+                        double ratio = (cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() / trg[i + k * F.rows()];
+                        double trg_diff = fabs((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() - trg[i + k * F.rows()]);
+                        if (trg_diff > trg_diff_max)
+                            trg_diff_max = trg_diff;
+                        if (ratio > ratio_max)
+                            ratio_max = ratio;
+                        if (ratio < ratio_min)
+                            ratio_min = ratio;
+                        ratio_sum += ratio;
+                        trg_diff_sum += trg_diff;
+                        count++;
+                    }
                 }
             }
         }
