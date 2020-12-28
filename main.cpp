@@ -255,6 +255,8 @@ int main(int argc, char *argv[])
     Xi FN, FTC;
     Xi cut;
 
+    const double eps = 1e-8;
+
     std::string model = argv[1];
     igl::deserialize(F, "F", model);
     igl::deserialize(uv_init, "uv", model);
@@ -305,7 +307,7 @@ int main(int argc, char *argv[])
     std::vector<double> trg(F.rows(), 0);
     Xi TT;
     igl::triangle_triangle_adjacency(F, TT);
-    double sum1 = 0, sum2 = 0;
+    
     for (int i = 0; i < trg.size(); i++)
     {
         for (int j = 0; j < 3; j++)
@@ -313,29 +315,12 @@ int main(int argc, char *argv[])
             if (TT(i, j) == -1)
             {
                 trg[i] = scale(F(i, j), F(i, (j + 1) % 3));
-                // trg[i] =1;
-                break;
-                // trg[i] = 0;
                 // trg[i] = 1;
-                // sum1 += trg[i];
-                // sum2 += (cur_uv.row(F(i,j)) - cur_uv.row(F(i, (j+1)%3))).norm();
+                break;
             }
         }
     }
-    // for (int i = 0; i < trg.size(); i++)
-    // {
-    //     if (trg[i] != 0)
-    //     {
-    //         trg[i] = trg[i] / sum1 * sum2;
-    //     }
-    //     for (int j = 0; j < 3; j++)
-    //     {
-    //         if (TT(i, j) == -1)
-    //         {
-    //             std::cout << "trg: " << trg[i] << "\treal: " <<  (cur_uv.row(F(i,j)) - cur_uv.row(F(i, (j+1)%3))).norm() << std::endl;
-    //         }
-    //     }
-    // }
+
     spXd Dx, Dy, G;
     prepare(V_uv, F, trg, Dx, Dy, true);
     G = combine_Dx_Dy(Dx, Dy);
@@ -358,20 +343,37 @@ int main(int argc, char *argv[])
         return gradE;
     };
 
-    auto compute_energy_max = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa) {
+    auto compute_energy_max = [&G, &dblarea, &mesh_area, &trg](Eigen::MatrixXd &aaa) {
         Xd Ji;
         jacobian_from_uv(G, aaa, Ji);
         auto E = symmetric_dirichlet_energy(Ji.col(0), Ji.col(1), Ji.col(2), Ji.col(3));
-        double max_e = E(0);
+        double max_e = -1;
         for (int i = 0; i < E.size(); i++)
         {
             // std::cout << "E(triangle " << i << "): " << E(i) << std::endl;
-            if (E(i) > max_e)
+            if (trg[i] != 0 && E(i) > max_e)
             {
                 max_e = E(i);
             }
         }
         return max_e;
+    };
+
+    auto compute_energy_no_plastic = [&G, &dblarea, &mesh_area, &trg](Eigen::MatrixXd &aaa) {
+        Xd Ji;
+        jacobian_from_uv(G, aaa, Ji);
+        auto E = symmetric_dirichlet_energy(Ji.col(0), Ji.col(1), Ji.col(2), Ji.col(3));
+        double e_avg = 0.0;
+        double area = 0;
+        for (int i = 0; i < E.size(); i++)
+        {
+            if (trg[i] != 0)
+            {
+                e_avg += E(i) * dblarea(i);
+                area += dblarea(i);
+            }
+        }
+        return e_avg / area;
     };
 
     auto compute_energy_all = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa) {
@@ -392,12 +394,12 @@ int main(int argc, char *argv[])
     // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
 
-    for (int ii = start_iter + 1; ii < 250; ii++)
+    for (int ii = start_iter + 1; ii < 300; ii++)
     {
         spXd hessian;
         Vd gradE;
         std::cout << "\nIt" << ii << std::endl;
-        if (ii == 51)
+        if (ii == 51) // adjust the targets to LS
         {
             double sum1 = 0, sum2 = 0;
             for (int i = 0; i < trg.size(); i++)
@@ -445,10 +447,15 @@ int main(int argc, char *argv[])
         {
             if (trg[i] != 0)
                 dblarea(i) = trg[i] * trg[i] * sqrt(3) / 2;
-            else
+            else if (dblarea_tmp(i) > eps)
             {
                 dblarea(i) = dblarea_tmp(i);
             }
+            else
+            {
+                dblarea(i) = eps;
+            }
+            
         }
         if (ii < 51)
             dblarea.setConstant(sqrt(3) / 2);
@@ -464,18 +471,16 @@ int main(int argc, char *argv[])
         spXd kkt(hessian.rows() + Aeq.rows(), hessian.cols() + Aeq.rows());
         buildkkt(hessian, Aeq, AeqT, kkt);
 
-        // if (ii == start_iter + 1)
-        if (true)
-        {
-            // solver.analyzePattern(hessian);
-            solver.analyzePattern(kkt);
-        }
-
+        solver.analyzePattern(kkt); // analyze pattern for each iteration
+        
+        // resize gradE
         gradE.conservativeResize(kkt.cols());
         for (int i = hessian.cols(); i < kkt.cols(); i++)
         {
             gradE(i) = 0;
         }
+        
+        // solve
         solver.factorize(kkt);
         std::cout << "solver.info() = " << solver.info() << std::endl;
         Vd newton = solver.solve(gradE);
@@ -484,19 +489,15 @@ int main(int argc, char *argv[])
         newton.conservativeResize(hessian.cols());
         gradE.conservativeResize(hessian.cols());
 
-        if (solver.info() != Eigen::Success)
-        {
-            std::cout << "solver.info() = " << solver.info() << std::endl;
-        }
-
-        Xd new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton
+        Xd new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton direction
         std::cout << "-gradE.dot(Dx) = " << newton.dot(gradE) << "\n";
         double newton_dec2 = newton.dot(hessian * newton);
         double step_size;
         energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, compute_grad, gradE, energy, step_size);
+        
         Vd gradL = gradE + AeqT * w;
 
-        double E_avg = compute_energy(cur_uv), E_max = compute_energy_max(cur_uv);
+        double E_avg = compute_energy_no_plastic(cur_uv), E_max = compute_energy_max(cur_uv);
         int n_flip = check_flip(cur_uv, F);
         std::cout << std::setprecision(20)
                   << "E=" << E_avg << "\t\tE_max=" << E_max
@@ -504,6 +505,9 @@ int main(int argc, char *argv[])
         std::cout << "neton_dec^2 = " << newton_dec2 << std::endl;
         std::cout << "#fl = " << n_flip << std::endl;
         std::cout << "lambda = " << lambda << std::endl;
+        
+        
+        // compare bd edge length with targets
         double trg_diff_max = -1;
         double trg_diff_sum = 0;
         double ratio_max = -1;
@@ -543,7 +547,7 @@ int main(int argc, char *argv[])
             break;
 
         old_energy = energy;
-        // save the cur_uv
+        // save the cur_uv for each iteration
         std::string outfilename = "./serialized/cur_uv_step" + std::to_string(ii);
         igl::serialize(cur_uv, "cur_uv", outfilename, true);
     }
