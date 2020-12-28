@@ -28,9 +28,10 @@
 
 #include <fstream>
 #include <igl/triangle_triangle_adjacency.h>
-void prepare(const Eigen::MatrixXd &V, Eigen::MatrixXi &F, const std::vector<double> &trg, spXd &Dx,
+void prepare(const Eigen::MatrixXd &V, Eigen::MatrixXi &F, const std::vector<double> &trg, const Vd &area, spXd &Dx,
              spXd &Dy, bool uniform)
 {
+    const double eps = 1e-8;
     Eigen::MatrixXd F1(F.rows(), 3), F2(F.rows(), 3), F3(F.rows(), 3);
     igl::local_basis(V, F, F1, F2, F3);
     Eigen::SparseMatrix<double> G;
@@ -68,9 +69,9 @@ void prepare(const Eigen::MatrixXd &V, Eigen::MatrixXi &F, const std::vector<dou
     }
     else
     {
-        for (int i = 0; i < trg.size(); i++)
+        for (int i = 0; i < F.rows(); i++)
         {
-            if (trg[i] != 0)
+            if (trg[i] != 0 || area(i) < eps)
             {
                 F1(i, 0) = 1;
                 F1(i, 1) = 0;
@@ -308,7 +309,7 @@ int main(int argc, char *argv[])
     Xi TT;
     igl::triangle_triangle_adjacency(F, TT);
     
-    for (int i = 0; i < trg.size(); i++)
+    for (int i = 0; i < F.rows(); i++)
     {
         for (int j = 0; j < 3; j++)
         {
@@ -322,10 +323,10 @@ int main(int argc, char *argv[])
     }
 
     spXd Dx, Dy, G;
-    prepare(V_uv, F, trg, Dx, Dy, true);
-    G = combine_Dx_Dy(Dx, Dy);
-    // update area
     igl::doublearea(cur_uv, F, dblarea);
+    prepare(V_uv, F, trg, dblarea, Dx, Dy, true);
+    G = combine_Dx_Dy(Dx, Dy);
+    // update area for uniform
     dblarea.setConstant(sqrt(3) / 2);
     dblarea = dblarea / 2;
     mesh_area = dblarea.sum();
@@ -394,6 +395,9 @@ int main(int argc, char *argv[])
     // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
     Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
 
+
+
+    // start!!
     for (int ii = start_iter + 1; ii < 300; ii++)
     {
         spXd hessian;
@@ -432,17 +436,18 @@ int main(int argc, char *argv[])
         V_uv = cur_uv;
         V_uv.conservativeResize(cur_uv.rows(), 3);
         V_uv.col(2).setConstant(0);
+        Vd dblarea_tmp;
+        igl::doublearea(cur_uv, F, dblarea_tmp);
         if (ii < 51)
         {
-            prepare(V_uv, F, trg, Dx, Dy, true);
+            prepare(V_uv, F, trg, dblarea_tmp, Dx, Dy, true);
         }
         else
         {
-            prepare(V_uv, F, trg, Dx, Dy, false);
+            prepare(V_uv, F, trg, dblarea_tmp, Dx, Dy, false);
         }
         G = combine_Dx_Dy(Dx, Dy);
-        Vd dblarea_tmp;
-        igl::doublearea(cur_uv, F, dblarea_tmp);
+        
         for (int i = 0; i < F.rows(); i++)
         {
             if (trg[i] != 0)
