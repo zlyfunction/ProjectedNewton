@@ -163,10 +163,10 @@ int main(int argc, char *argv[])
     // for visualization
     Eigen::MatrixXi cut;
     Eigen::VectorXd S;
-    igl::deserialize(F, "F", model);
+    igl::deserialize(F, "Fuv", model);
     igl::deserialize(uv, "uv", model);
     igl::deserialize(V, "V", model);
-
+    V.conservativeResize(uv.rows(), 3);
     // Eigen::VectorXd Energy(F.rows());
     Eigen::MatrixXd color(F.rows(), 3);
     // igl::doublearea(V, F, dblarea_3d);

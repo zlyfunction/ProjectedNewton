@@ -183,7 +183,7 @@ void buildAeq(
     // add 2 constraints for each component
     for (auto l : bds)
     {
-        std::cout << "fix " << l[0] << " " << l[1] << std::endl;
+        std::cout << "fix " << l[0]  << std::endl;
         Aeq.coeffRef(c, l[0]) = 1;
         Aeq.coeffRef(c + 1, l[0] + N) = 1;
         c = c + 2;
@@ -259,9 +259,10 @@ int main(int argc, char *argv[])
     const double eps = 1e-8;
 
     std::string model = argv[1];
-    igl::deserialize(F, "F", model);
+    igl::deserialize(F, "Fuv", model);
     igl::deserialize(uv_init, "uv", model);
     igl::deserialize(V, "V", model);
+    V.conservativeResize(uv_init.rows(), 3);
     for (int i = 0; i < V.rows(); i++)
     {
         for (int j = 0; j < V.cols(); j++)
@@ -518,7 +519,7 @@ int main(int argc, char *argv[])
         newton.conservativeResize(hessian.cols());
         gradE.conservativeResize(hessian.cols());
 
-        Xd new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton direction
+        Xd new_dir = -Eigen::Map<Xd>(newton.data(), cur_uv.rows(), 2); // newton direction
         std::cout << "-gradE.dot(Dx) = " << newton.dot(gradE) << "\n";
         double newton_dec2 = newton.dot(hessian * newton);
         double step_size;
