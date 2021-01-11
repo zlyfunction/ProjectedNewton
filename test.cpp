@@ -27,69 +27,24 @@
 #include "projected_newton.hpp"
 
 #include <fstream>
-
-void construct_Fn(Eigen::MatrixXi &Fn, const Eigen::MatrixXi &F_copy, const std::vector<Eigen::Vector3i> &new_face_list, const std::vector<int> &delete_faces)
+#include <igl/triangle_triangle_adjacency.h>
+void prepare(const Eigen::MatrixXd &V, Eigen::MatrixXi &F, const std::vector<double> &trg, const Vd &area, spXd &Dx,
+             spXd &Dy, bool uniform)
 {
+    const double eps = 1e-8;
+    Eigen::MatrixXd F1(F.rows(), 3), F2(F.rows(), 3), F3(F.rows(), 3);
+    igl::local_basis(V, F, F1, F2, F3);
+    Eigen::SparseMatrix<double> G;
 
-    Fn.resize(F_copy.rows() - delete_faces.size() + new_face_list.size(), F_copy.cols());
-    int tmp = -1;
-    if (delete_faces.size() >= 1)
+    if (uniform)
     {
-        for (int j = 0; j < delete_faces[0]; j++)
-        {
-            tmp++;
-            Fn.row(tmp) = F_copy.row(j);
-        }
-        for (int i = 0; i < delete_faces.size() - 1; i++)
-        {
-            for (int j = delete_faces[i] + 1; j < delete_faces[i + 1]; j++)
-            {
-                tmp++;
-                Fn.row(tmp) = F_copy.row(j);
-            }
-        }
-        for (int j = delete_faces.back() + 1; j < F_copy.rows(); j++)
-        {
-            tmp++;
-            Fn.row(tmp) = F_copy.row(j);
-        }
+        igl::grad(V, F, G, true); // use uniform mesh instead of V
     }
     else
     {
-        for (int j = 0; j < F_copy.rows(); j++)
-        {
-            tmp++;
-            Fn.row(tmp) = F_copy.row(j);
-        }
+        igl::grad_plastic(V, F, trg, G);
     }
 
-    for (int i = 0; i < new_face_list.size(); i++)
-    {
-        tmp++;
-        Fn.row(tmp) = new_face_list[i];
-    }
-}
-
-void prepare(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, spXd &Dx,
-             spXd &Dy)
-{
-    Eigen::MatrixXd F1, F2, F3;
-    igl::local_basis(V, F, F1, F2, F3);
-    Eigen::SparseMatrix<double> G;
-    // igl::grad(V, F, G);
-    igl::grad(V, F, G, true); // use uniform mesh instead of V
-    // modify F1, F2 to get the right Dx, Dy
-    std::cout << "F1 before" << F1 << std::endl;
-    F1.col(0).setConstant(1);
-    F1.col(1).setConstant(0);
-    F1.col(2).setConstant(0);
-    std::cout << "F1 after" << F1 << std::endl;
-
-    std::cout << "F2 before" << F2 << std::endl;
-    F2.col(0).setConstant(0);
-    F2.col(1).setConstant(1);
-    F2.col(2).setConstant(0);
-    std::cout << "F2 after" << F2 << std::endl;
     auto face_proj = [](Eigen::MatrixXd &F) {
         std::vector<Eigen::Triplet<double>> IJV;
         int f_num = F.rows();
@@ -103,6 +58,30 @@ void prepare(const Eigen::MatrixXd &V, const Eigen::MatrixXi &F, spXd &Dx,
         P.setFromTriplets(IJV.begin(), IJV.end());
         return P;
     };
+    if (uniform)
+    {
+        F1.col(0).setConstant(1);
+        F1.col(1).setConstant(0);
+        F1.col(2).setConstant(0);
+        F2.col(0).setConstant(0);
+        F2.col(1).setConstant(1);
+        F2.col(2).setConstant(0);
+    }
+    else
+    {
+        for (int i = 0; i < F.rows(); i++)
+        {
+            if (trg[i] != 0 || area(i) < eps)
+            {
+                F1(i, 0) = 1;
+                F1(i, 1) = 0;
+                F1(i, 2) = 0;
+                F2(i, 0) = 0;
+                F2(i, 1) = 1;
+                F2(i, 2) = 0;
+            }
+        }
+    }
 
     Dx = face_proj(F1) * G;
     Dy = face_proj(F2) * G;
@@ -204,7 +183,7 @@ void buildAeq(
     // add 2 constraints for each component
     for (auto l : bds)
     {
-        std::cout << "fix " << l[0] << " " << l[1] << std::endl;
+        std::cout << "fix " << l[0]  << std::endl;
         Aeq.coeffRef(c, l[0]) = 1;
         Aeq.coeffRef(c + 1, l[0] + N) = 1;
         c = c + 2;
@@ -244,6 +223,7 @@ void buildkkt(spXd &hessian, spXd &Aeq, spXd &AeqT, spXd &kkt)
         }
     }
     kkt.finalize();
+    std::cout << "finish build" << std::endl;
 }
 
 long global_autodiff_time = 0;
@@ -273,53 +253,41 @@ int main(int argc, char *argv[])
     Eigen::VectorXi bnd;
     Xd bnd_uv;
     double mesh_area;
-    Xd CN;
+    Xd CN, scale;
     Xi FN, FTC;
     Xi cut;
 
-    if (argc > 1)
+    const double eps = 1e-8;
+
+    std::string model = argv[1];
+    igl::deserialize(F, "Fuv", model);
+    igl::deserialize(uv_init, "uv", model);
+    igl::deserialize(V, "V", model);
+    V.conservativeResize(uv_init.rows(), 3);
+    for (int i = 0; i < V.rows(); i++)
     {
-        std::cout << "read model\n";
-        std::string model = argv[1];
-        igl::readOBJ(model, V, uv_init, CN, F, FN, FN);
-        std::cout << V << std::endl;
-        std::cout << uv_init << std::endl;
-        std::cout << F << std::endl;
-        // igl::deserialize(F, "F", model);
-        // igl::deserialize(uv_init, "uv", model);
-        // igl::deserialize(V, "V", model);
-
+        for (int j = 0; j < V.cols(); j++)
+        {
+            if (abs(V(i, j)) < 1e-15)
+                V(i, j) = 0;
+        }
     }
-    else
-    {
-        std::cout << "test single triangle\n";
-        F.resize(1,3);
-        F << 0, 1, 2;
-        uv_init.resize(3, 2);
-        uv_init << 0.0, 0.0, 1.0, 0.0, 0.0, 1.0;
-        // uv_init << 0.0, 0.0, 1.0, 0.0, 0.5, sqrt(3) / 2.0;
 
-        V.resize(3, 3);
-        V << 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, sqrt(3) / 2.0, 0.0;
-    }
-    
-    igl::writeOBJ("input_init.obj", V, F, CN, FN, uv_init, F);
-    
-    
+    // deserialize cut
+    igl::deserialize(cut, "cut", model);
+    // igl::deserialize(scale, "scale", model);
+    std::cout << F.rows() << " " << uv_init.rows() << " " << V.rows() << " " << cut.rows() << std::endl;
+    spXd Aeq;
+    buildAeq(cut, uv_init, F, Aeq);
 
+    spXd AeqT = Aeq.transpose();
     Vd dblarea_uv;
     igl::doublearea(uv_init, F, dblarea_uv);
+    igl::writeOBJ("input_init.obj", V, F, CN, FN, uv_init, F);
 
+    std::cout << "#fl = " << check_flip(uv_init, F);
     Vd dblarea;
-    igl::doublearea(V, F, dblarea);
-    dblarea.setConstant(1); // set area to be a constant
-    mesh_area = dblarea.sum();
-    
-    
-    spXd Dx, Dy, G;
-    prepare(V, F, Dx, Dy);
-    G = combine_Dx_Dy(Dx, Dy);
-    std::cout << G.rows() << " " << G.cols() << std::endl;
+
     int start_iter = 0;
     Xd cur_uv;
     if (argc > 2)
@@ -334,10 +302,48 @@ int main(int argc, char *argv[])
         cur_uv = uv_init;
     }
 
+    // prepare
+    Xd V_uv = cur_uv;
+    V_uv.conservativeResize(cur_uv.rows(), 3);
+    V_uv.col(2).setConstant(0);
+    // build target
+    std::vector<double> trg(F.rows() * 3, 0);
+    Xi TT;
+    igl::triangle_triangle_adjacency(F, TT);
+
+    // TODO: add support for 2-trg-edge triangles
+    for (int i = 0; i < F.rows(); i++)
+    {
+        for (int j = 0; j < 3; j++)
+        {
+            if (TT(i, j) == -1)
+            {
+                trg[i] = 1;
+                // if (trg[i] == 0)
+                //     trg[i] = scale(F(i, j), F(i, (j + 1) % 3));
+                // else
+                // {
+                //     trg[i + F.rows()] = trg[i];
+                //     trg[i + 2 * F.rows()] = scale(F(i, j), F(i, (j + 1) % 3));
+                //     trg[i] = -1;
+                //     std::cout << "triangle " << i << " : " << trg[i + F.rows()] << " " << trg[i + F.rows() * 2] << std::endl;
+                // }
+            }
+        }
+    }
+
+    spXd Dx, Dy, G;
+    igl::doublearea(cur_uv, F, dblarea);
+    prepare(V_uv, F, trg, dblarea, Dx, Dy, true);
+    G = combine_Dx_Dy(Dx, Dy);
+    // update area for uniform
+    dblarea.setConstant(sqrt(3) / 2);
+    dblarea = dblarea / 2;
+    mesh_area = dblarea.sum();
+
     auto compute_energy = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa) {
         Xd Ji;
         jacobian_from_uv(G, aaa, Ji);
-        // std::cout << Ji << std::endl;
         return compute_energy_from_jacobian(Ji, dblarea);
     };
 
@@ -348,12 +354,26 @@ int main(int argc, char *argv[])
         return gradE;
     };
 
-    auto compute_energy_max = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa) {
+    auto compute_energy_max_no_plastic = [&G, &dblarea, &mesh_area, &trg](Eigen::MatrixXd &aaa) {
         Xd Ji;
         jacobian_from_uv(G, aaa, Ji);
-        // std::cout << "Jacobian:\n" << Ji << std::endl;
         auto E = symmetric_dirichlet_energy(Ji.col(0), Ji.col(1), Ji.col(2), Ji.col(3));
-        double max_e = E(0);
+        double max_e = -1;
+        for (int i = 0; i < E.size(); i++)
+        {
+            // std::cout << "E(triangle " << i << "): " << E(i) << std::endl;
+            if (trg[i] != 0 && E(i) > max_e)
+            {
+                max_e = E(i);
+            }
+        }
+        return max_e;
+    };
+    auto compute_energy_max = [&G, &dblarea, &mesh_area, &trg](Eigen::MatrixXd &aaa) {
+        Xd Ji;
+        jacobian_from_uv(G, aaa, Ji);
+        auto E = symmetric_dirichlet_energy(Ji.col(0), Ji.col(1), Ji.col(2), Ji.col(3));
+        double max_e = -1;
         for (int i = 0; i < E.size(); i++)
         {
             // std::cout << "E(triangle " << i << "): " << E(i) << std::endl;
@@ -363,6 +383,23 @@ int main(int argc, char *argv[])
             }
         }
         return max_e;
+    };
+
+    auto compute_energy_no_plastic = [&G, &dblarea, &mesh_area, &trg](Eigen::MatrixXd &aaa) {
+        Xd Ji;
+        jacobian_from_uv(G, aaa, Ji);
+        auto E = symmetric_dirichlet_energy(Ji.col(0), Ji.col(1), Ji.col(2), Ji.col(3));
+        double e_avg = 0.0;
+        double area = 0;
+        for (int i = 0; i < E.size(); i++)
+        {
+            if (trg[i] != 0)
+            {
+                e_avg += E(i) * dblarea(i);
+                area += dblarea(i);
+            }
+        }
+        return e_avg / area;
     };
 
     auto compute_energy_all = [&G, &dblarea, &mesh_area](Eigen::MatrixXd &aaa) {
@@ -375,117 +412,160 @@ int main(int argc, char *argv[])
     std::cout << "Start Energy" << energy << std::endl;
     double old_energy = energy;
 
-    // double lambda = 0.999;
     double lambda = 1.0;
 
     std::ofstream writecsv;
     writecsv.open("log.csv");
-    writecsv << "step,E_avg,E_max,step_size,|dir|,|gradL|,newton_dec^2,lambda,#flip" << std::endl;
-    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
-    // Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
-    for (int ii = start_iter + 1; ii < 100000; ii++)
+    writecsv << "step,E_avg,E_max,step_size,|dir|,|gradL|,newton_dec^2,lambda,#flip,trg_diff_max,trg_diff_avg,ratio_min,ratio_max,ratio_avg" << std::endl;
+    // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
+    Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+    
+    int total_step = 20000;
+    int uniform_step = 20000;
+    int gd_step = 100;
+
+    double step_size_last_it = 1;
+    std::vector<bool> do_gd(total_step, false);
+    // start!!
+    for (int ii = start_iter + 1; ii < total_step; ii++)
     {
         spXd hessian;
         Vd gradE;
         std::cout << "\nIt" << ii << std::endl;
-        get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
-
-        // fix two dofs
-        for (int k = 0; k < hessian.outerSize(); k++)
+        if (ii == uniform_step + 1) // adjust the targets to LS
         {
-            for (Eigen::SparseMatrix<double>::InnerIterator it(hessian, k); it; ++it)
+            double sum1 = 0, sum2 = 0;
+            for (int i = 0; i < F.rows(); i++)
             {
-                if (it.row() == 0 || it.col()  == 0)
+                if (trg[i] > 0)
                 {
-                    if (it.col() == it.row())
+                    for (int j = 0; j < 3; j++)
                     {
-                        it.valueRef() = 1.0;
-                    }
-                    else
-                    {
-                        it.valueRef() = 0;
+                        if (TT(i, j) == -1)
+                        {
+                            sum1 += trg[i] * trg[i];
+                            sum2 += ((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm()) * trg[i];
+                        }
                     }
                 }
-                if (it.row() == V.rows() || it.col() == V.rows())
+                else
                 {
-                    if (it.col() == it.row())
+                    int k = 0;
+                    for (int j = 0; j < 3; j++)
                     {
-                        it.valueRef() = 1.0;
-                    }   
-                    else
-                    {
-                        it.valueRef() = 0;
+                        if (TT(i, j) == -1)
+                        {
+                            k++;
+                            sum1 += trg[k * F.rows() + i] * trg[k * F.rows() + i];
+                            sum2 += ((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm()) * trg[k * F.rows() + i];
+                        }
                     }
                 }
-                // if (it.row() == 1 || it.col()  == 1)
+            }
+            for (int i = 0; i < trg.size(); i++)
+            {
+                if (trg[i] > 0)
+                {
+                    trg[i] = trg[i] / sum1 * sum2;
+                }
+                // for (int j = 0; j < 3; j++)
                 // {
-                //     if (it.col() == it.row())
+                //     if (TT(i, j) == -1)
                 //     {
-                //         it.valueRef() = 1.0;
-                //     }
-                //     else
-                //     {
-                //         it.valueRef() = 0;
+                //         std::cout << "trg: " << trg[i] << "\treal: " << (cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() << std::endl;
                 //     }
                 // }
-                
-                // if (it.row() == V.rows() + 1 || it.col() == V.rows() + 1)
-                // {
-                //     if (it.col() == it.row())
-                //     {
-                //         it.valueRef() = 1.0;
-                //     }   
-                //     else
-                //     {
-                //         it.valueRef() = 0;
-                //     }
-                // }
-            
             }
         }
-        
-        gradE(0) = 0;
-        gradE(V.rows()) = 0; 
-        // gradE(1) = 0; 
-        // gradE(V.rows() + 1) = 0;
+        // prepare for each iteration
+        // V_uv = cur_uv;
+        // V_uv.conservativeResize(cur_uv.rows(), 3);
+        // V_uv.col(2).setConstant(0);
+        // Vd dblarea_tmp;
+        // igl::doublearea(cur_uv, F, dblarea_tmp);
+        // if (ii < uniform_step + 1)
+        // {
+        //     prepare(V_uv, F, trg, dblarea_tmp, Dx, Dy, true);
+        // }
+        // else
+        // {
+        //     prepare(V_uv, F, trg, dblarea_tmp, Dx, Dy, false);
+        // }
+        // G = combine_Dx_Dy(Dx, Dy);
 
-        // add disturb to avoid singular
-        // spXd Id(hessian.rows(), hessian.cols());
-        // Id.setIdentity();
-        // hessian = hessian + 1e-10 * Id;
-
-        std::string hessian_filename = "hessian/hessian_" + std::to_string(ii) + ".txt";
-        write_hessian_to_file(hessian, hessian_filename);
-        
-        std::string grad_filename = "hessian/gradE_" + std::to_string(ii) + ".txt";
-        std::ofstream write_grad;
-        write_grad.open(grad_filename);
-        write_grad << std::setprecision(20) << gradE;
-
-        std::string uv_filename = "hessian/uv_" + std::to_string(ii) + ".txt";
-        std::ofstream write_uv;
-        write_uv.open(uv_filename);
-        write_uv << std::setprecision(20) << Eigen::Map<Vd>(cur_uv.data(), cur_uv.size());
-        
-        if (ii == start_iter + 1)
+        // for (int i = 0; i < F.rows(); i++)
+        // {
+        //     if (trg[i] > 0)
+        //         dblarea(i) = trg[i] * trg[i] * sqrt(3) / 2;
+        //     else if (trg[i] == -1)
+        //     {
+        //         dblarea(i) = trg[i + F.rows()] * trg[i + 2 * F.rows()] * sqrt(3) / 2;
+        //     }
+        //     else if (dblarea_tmp(i) > eps)
+        //     {
+        //         dblarea(i) = dblarea_tmp(i);
+        //     }
+        //     else
+        //     {
+        //         dblarea(i) = eps;
+        //     }
+        // }
+        // if (ii < uniform_step + 1) // set the are to be uniform
+        //     dblarea.setConstant(sqrt(3) / 2);
+        // dblarea = dblarea / 2;
+        // mesh_area = dblarea.sum();
+        if (ii >= uniform_step + 1)
         {
-            // solver.analyzePattern(hessian);
-            solver.analyzePattern(hessian);
+            energy = compute_energy(cur_uv);
+            old_energy = energy;
+        }
+        get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
+        if (step_size_last_it == 0)
+        {
+            for (int kk = 0; kk < gd_step; kk++) do_gd[ii + kk] = true;
+        }
+        if (do_gd[ii])
+        {
+            std::cout << "do gradient descent\n";
+            hessian.setIdentity();
+        }
+        spXd kkt(hessian.rows() + Aeq.rows(), hessian.cols() + Aeq.rows());
+        buildkkt(hessian, Aeq, AeqT, kkt);
+
+        solver.analyzePattern(kkt); // analyze pattern for each iteration
+
+        // resize gradE
+        gradE.conservativeResize(kkt.cols());
+        for (int i = hessian.cols(); i < kkt.cols(); i++)
+        {
+            gradE(i) = 0;
         }
 
-        solver.factorize(hessian);
+        // solve
+        solver.factorize(kkt);
+        std::cout << "solver.info() = " << solver.info() << std::endl;
         Vd newton = solver.solve(gradE);
 
-        Xd new_dir = -Eigen::Map<Xd>(newton.data(), V.rows(), 2); // newton
+        Vd w = -newton.tail(newton.rows() - hessian.cols());
+        newton.conservativeResize(hessian.cols());
+        gradE.conservativeResize(hessian.cols());
+
+        Xd new_dir = -Eigen::Map<Xd>(newton.data(), cur_uv.rows(), 2); // newton direction
         std::cout << "-gradE.dot(Dx) = " << newton.dot(gradE) << "\n";
         double newton_dec2 = newton.dot(hessian * newton);
-        // energy = wolfe_linesearch(F, cur_uv, new_dir, compute_energy, gradE, energy, use_gd);
         double step_size;
         energy = bi_linesearch(F, cur_uv, new_dir, compute_energy, compute_grad, gradE, energy, step_size);
+        step_size_last_it = step_size;
+
+        Vd gradL = gradE + AeqT * w;
+
+        double E_avg, E_max;
+        if (ii > uniform_step)
+            {E_avg = compute_energy_no_plastic(cur_uv); E_max = compute_energy_max_no_plastic(cur_uv);}
+        else
+            {E_avg = compute_energy(cur_uv); E_max = compute_energy_max(cur_uv);}
+
         
-        get_grad_and_hessian(G, dblarea, cur_uv, gradE, hessian);
-        Vd gradL = gradE;
-        double E_avg = compute_energy(cur_uv), E_max = compute_energy_max(cur_uv);
         int n_flip = check_flip(cur_uv, F);
         std::cout << std::setprecision(20)
                   << "E=" << E_avg << "\t\tE_max=" << E_max
@@ -493,23 +573,79 @@ int main(int argc, char *argv[])
         std::cout << "neton_dec^2 = " << newton_dec2 << std::endl;
         std::cout << "#fl = " << n_flip << std::endl;
         std::cout << "lambda = " << lambda << std::endl;
-        // std::cout << "uv = \n";
-        // for (int kk = 0; kk < cur_uv.rows(); kk++)
-        // {
-        //     std::cout << cur_uv.row(kk) << std::endl;
-        // }
 
-        writecsv << std::setprecision(20) << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << "," << new_dir.norm() << "," << gradL.norm() << "," << newton_dec2 << "," << lambda << "," << n_flip << std::endl;
-        // if (std::abs(energy - 4) < 1e-10)
-        //     // norm of the gradE
-        // if (std::abs(energy - old_energy) < 1e-9)
-        if (step_size == 0)
+        // compare bd edge length with targets
+        double trg_diff_max = -1;
+        double trg_diff_sum = 0;
+        double ratio_max = -1;
+        double ratio_min = 1e10;
+        double ratio_sum = 0;
+        int count = 0;
+        for (int i = 0; i < F.rows(); i++)
+        {
+            if (trg[i] > 0)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    if (TT(i, j) == -1)
+                    {
+                        double ratio = (cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() / trg[i];
+                        double trg_diff = fabs((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() - trg[i]);
+                        // std::cout << ratio << " " << trg_diff << std::endl;
+                        if (trg_diff > trg_diff_max)
+                            trg_diff_max = trg_diff;
+                        if (ratio > ratio_max)
+                            ratio_max = ratio;
+                        if (ratio < ratio_min)
+                            ratio_min = ratio;
+                        ratio_sum += ratio;
+                        trg_diff_sum += trg_diff;
+                        count++;
+                    }
+                }
+            }
+            else if (trg[i] == -1)
+            {
+                int k = 0;
+                for (int j = 0; j < 3; j++)
+                {
+                    if (TT(i, j) == -1)
+                    {
+                        k++;
+                        double ratio = (cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() / trg[i + k * F.rows()];
+                        double trg_diff = fabs((cur_uv.row(F(i, j)) - cur_uv.row(F(i, (j + 1) % 3))).norm() - trg[i + k * F.rows()]);
+                        if (trg_diff > trg_diff_max)
+                            trg_diff_max = trg_diff;
+                        if (ratio > ratio_max)
+                            ratio_max = ratio;
+                        if (ratio < ratio_min)
+                            ratio_min = ratio;
+                        ratio_sum += ratio;
+                        trg_diff_sum += trg_diff;
+                        count++;
+                    }
+                }
+            }
+        }
+        std::cout << "trg_diff_max = " << trg_diff_max << std::endl;
+        std::cout << "trg_diff_avg = " << trg_diff_sum / count << std::endl;
+        std::cout << "ratio_min = " << ratio_min << std::endl;
+        std::cout << "ratio_max = " << ratio_max << std::endl;
+        std::cout << "ratio_avg = " << ratio_sum / count << std::endl;
+        writecsv << std::setprecision(20) << ii << "," << std::setprecision(20) << E_avg << "," << E_max << "," << step_size << "," << new_dir.norm() << "," << gradL.norm() << "," << newton_dec2 << "," << lambda << "," << n_flip << "," << trg_diff_max << "," << trg_diff_sum / count << ","
+                 << ratio_min << "," << ratio_max << "," << ratio_sum / count << std::endl;
+        if (std::abs(energy - 4) < 1e-10)
+            // norm of the gradE
+            // if (std::abs(energy - old_energy) < 1e-9)
             break;
 
         old_energy = energy;
-
-        // save the cur_uv
+        // save the cur_uv for each iteration
         std::string outfilename = "./serialized/cur_uv_step" + std::to_string(ii);
         igl::serialize(cur_uv, "cur_uv", outfilename, true);
     }
+
+    // std::cout << "write mesh\n";
+    // igl::writeOBJ("out.obj", V, F, CN, FN, cur_uv, F);
+    // std::cout << compute_energy_all(cur_uv) << std::endl;
 }

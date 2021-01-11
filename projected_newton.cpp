@@ -218,7 +218,7 @@ double bi_linesearch(
     newx = cur_v + step_size * d;
     if (check_flip(newx, F) > 0)
     {
-      std::cout << "cause flip, step_size/=2\n";
+      // std::cout << "cause flip, step_size/=2\n";
       continue;
     }
     new_energy = energy(newx);
